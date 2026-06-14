@@ -2,12 +2,9 @@
 resolver = "2"
 members = [
     ".",
-    "rbf/rbf-core",
-    "rbf/rbf-parser",
-    "rbf/rbf-codegen",
-    "rbf/rbf-runtime",
-    "rbf/rbf-plugin",
-    "rbf/rbf-cli",
+]
+exclude = [
+    "rbf",
 ]
 
 [workspace.package]

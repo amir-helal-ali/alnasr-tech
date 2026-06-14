@@ -12,4 +12,4 @@ rbf/
 *.md
 docker-compose.yml
 .dockerignore
-migrations/
+frontend/

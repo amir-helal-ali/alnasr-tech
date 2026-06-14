@@ -1,40 +1,32 @@
 ---
-Task ID: 1
+Task ID: 2
 Agent: Main
-Task: Production-ready improvements for Al-Nasr Tech ERP + E-Invoicing System
+Task: Production-readiness improvements (continued from context reset)
 
 Work Log:
-- Fixed all compiler warnings (removed unused imports in middleware.rs and csv_utils.rs)
-- Rewrote router.rs with auth middleware on protected routes, public/protected/admin route groups
-- Added production CORS configuration with ALLOWED_ORIGINS env var support
-- Split auth.rs into public_router() and protected_router() for proper auth middleware application
-- Applied admin_only_middleware to /api/users/* and /api/tenants/* routes
-- Added comprehensive input validation to all handlers (CreateCustomerRequest, UpdateCustomerRequest, CreateInvoiceRequest, etc.)
-- Added transaction handling in all multi-step operations (create_customer, create_invoice, create_payment, etc.)
-- Added tenant isolation in all queries (filtering by tenant_id in SELECT/WHERE clauses)
-- Added RLS context setting in transaction-based handlers
-- Added invoice status transition endpoint (PATCH /api/invoices/{id}/status) with state machine validation
-- Added duplicate email checking for customers and users
-- Added payment method validation (cash, bank_transfer, credit_card, etc.)
-- Added role validation (admin, accountant, user, viewer)
-- Added plan validation for tenants (free, starter, professional, enterprise)
-- Prevented admin from deactivating their own account or own tenant
-- Added customer active invoice check before deletion
-- Added 41 unit tests and 17 integration tests (58 total, all passing)
-- Built release binary at 6.1MB (under 10MB target)
-- Added .env.example with all required environment variables documented
-- Added .gitignore
-- Added ALLOWED_ORIGINS to docker-compose.yml
-- Added health check with pool stats and version info
+- Fixed all 13 clippy warnings: removed useless .into() in config.rs, added Default impl for AppMetrics, updated MSRV to 1.80 for LazyLock, fixed needless borrow in email.rs, fixed needless Ok(? patterns in pdf.rs and csv_utils.rs
+- Fixed critical bug: admin routes were missing auth_middleware - only had admin_only_middleware which depends on Claims from auth_middleware. Added both layers in correct order.
+- Added invoice_line_items RLS policy in migration (was enabled for RLS but missing the policy)
+- Added reqwest::Error conversion to AppError for proper ETA API error handling
+- Added utoipa + utoipa-swagger-ui as optional "swagger" feature (feature-gated to keep binary small in production)
+- Created api_docs.rs module with OpenAPI 3.0 spec, security scheme (Bearer JWT), and tagged API groups
+- Added CSV export endpoints: GET /api/customers/export and GET /api/invoices/export
+- Added InvoiceCsvRow sqlx::FromRow derive for query_as
+- Added graceful DB pool cleanup (pool.close().await) on shutdown
+- Added background rate-limiter eviction task (runs every 5 minutes)
+- Fixed rbf-cli dead_code warning by splitting into lib.rs (pub fn run()) + main.rs
+- Updated Dockerfile from rust:1.75-alpine to rust:1.80-alpine
+- Created .env.example with documented production configuration template
 
 Stage Summary:
-- Zero compilation warnings from project code
+- Zero clippy warnings from project code
 - 58 tests passing (41 unit + 17 integration)
-- Release binary: 6.1MB
-- All protected routes require JWT authentication
-- Admin routes require both auth + admin role
-- All handlers enforce tenant isolation
-- All multi-step operations use database transactions
-- Input validation on all request types
-- Invoice status machine with valid transitions enforced
-- Production CORS configuration via environment variable
+- Release binary: 6.1MB (without swagger), 17MB (with swagger feature)
+- rbf-cli binary: 557KB
+- Full workspace release build passing
+- Critical auth bug fixed (admin routes)
+- RLS policy gap fixed (invoice_line_items)
+- OpenAPI docs available at /api/docs (when swagger feature enabled)
+- CSV export endpoints for customers and invoices
+- Background tasks for maintenance (rate limiter eviction)
+- Graceful shutdown with pool cleanup

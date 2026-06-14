@@ -38,11 +38,11 @@ impl AppConfig {
     pub fn load() -> Self {
         Self {
             database_url: SecretString::new(
-                env_or_panic("DATABASE_URL").into_boxed_str().into(),
+                env_or_panic("DATABASE_URL").into_boxed_str(),
             ),
 
             jwt_secret: SecretString::new(
-                env_or_panic("JWT_SECRET").into_boxed_str().into(),
+                env_or_panic("JWT_SECRET").into_boxed_str(),
             ),
             jwt_expiration_secs: env_or_parse("JWT_EXPIRATION_SECS", 3600),
 
@@ -51,7 +51,7 @@ impl AppConfig {
 
             eta_client_id: env_or_panic("ETA_CLIENT_ID"),
             eta_client_secret: SecretString::new(
-                env_or_panic("ETA_CLIENT_SECRET").into_boxed_str().into(),
+                env_or_panic("ETA_CLIENT_SECRET").into_boxed_str(),
             ),
             eta_token_url: env_or_panic("ETA_TOKEN_URL"),
             eta_submission_url: env_or_panic("ETA_SUBMISSION_URL"),
@@ -60,7 +60,7 @@ impl AppConfig {
             smtp_port: env_or_parse("SMTP_PORT", 587),
             smtp_user: env_or_panic("SMTP_USER"),
             smtp_pass: SecretString::new(
-                env_or_panic("SMTP_PASS").into_boxed_str().into(),
+                env_or_panic("SMTP_PASS").into_boxed_str(),
             ),
             smtp_from: env_or_panic("SMTP_FROM"),
         }

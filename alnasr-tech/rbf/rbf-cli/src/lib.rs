@@ -29,7 +29,8 @@ enum Commands {
     },
 }
 
-fn main() {
+/// Run the RBF CLI.
+pub fn run() {
     let cli = Cli::parse();
 
     match cli.command {

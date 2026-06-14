@@ -196,6 +196,9 @@ CREATE POLICY tenant_isolation_customers ON customers
 CREATE POLICY tenant_isolation_invoices ON invoices
     USING (tenant_id::text = current_setting('app.current_tenant_id', true));
 
+CREATE POLICY tenant_isolation_invoice_line_items ON invoice_line_items
+    USING (invoice_id IN (SELECT id FROM invoices WHERE tenant_id::text = current_setting('app.current_tenant_id', true)));
+
 CREATE POLICY tenant_isolation_payments ON payments
     USING (tenant_id::text = current_setting('app.current_tenant_id', true));
 

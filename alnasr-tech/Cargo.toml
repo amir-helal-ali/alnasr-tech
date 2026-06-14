@@ -13,7 +13,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.80"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -33,6 +33,7 @@ description = "Al-Nasr Tech ERP + E-Invoicing System"
 [features]
 default = []
 rbf = ["dep:wasmtime", "dep:wasmtime-wasi"]
+swagger = ["dep:utoipa", "dep:utoipa-swagger-ui"]
 
 [profile.release]
 opt-level = "z"          # Optimize for size
@@ -100,6 +101,10 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 
 # Base64
 base64 = "0.22"
+
+# OpenAPI / Swagger (optional – enable with --features swagger)
+utoipa = { version = "4", features = ["axum_extras", "chrono", "uuid", "decimal"], optional = true }
+utoipa-swagger-ui = { version = "6", features = ["axum"], optional = true }
 
 # RBF (optional – not compiled by default)
 wasmtime = { version = "17", optional = true }

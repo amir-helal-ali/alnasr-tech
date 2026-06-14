@@ -1,8 +1,10 @@
 use axum::{
     extract::{Path, Query, State},
+    response::{IntoResponse, Response},
     routing::{get, patch},
     Json, Router,
 };
+use http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -592,6 +594,32 @@ async fn update_invoice_status(
     Ok(Json(InvoiceDetailResponse { invoice, items }))
 }
 
+async fn export_invoices_handler(
+    State(pool): State<PgPool>,
+    claims: axum::Extension<Claims>,
+) -> Result<Response, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
+
+    let rows = sqlx::query_as::<_, crate::csv_utils::InvoiceCsvRow>(
+        "SELECT i.invoice_number, c.name as customer_name, i.status, i.subtotal::text, i.tax_total::text, i.total::text, \
+         TO_CHAR(i.issued_at, 'YYYY-MM-DD') as issued_at, TO_CHAR(i.due_date, 'YYYY-MM-DD') as due_date \
+         FROM invoices i JOIN customers c ON i.customer_id = c.id \
+         WHERE i.tenant_id = $1 \
+         ORDER BY i.created_at DESC"
+    )
+    .bind(tenant_id)
+    .fetch_all(&pool)
+    .await?;
+
+    let csv_bytes = crate::csv_utils::export_invoices_csv(&rows)?;
+
+    Ok((
+        [(CONTENT_TYPE, "text/csv; charset=utf-8"),
+         (CONTENT_DISPOSITION, "attachment; filename=\"invoices.csv\"")],
+        csv_bytes,
+    ).into_response())
+}
+
 async fn delete_invoice(
     State(pool): State<PgPool>,
     claims: axum::Extension<Claims>,
@@ -654,6 +682,7 @@ async fn delete_invoice(
 pub fn router() -> Router<PgPool> {
     Router::new()
         .route("/api/invoices", get(list_invoices).post(create_invoice))
+        .route("/api/invoices/export", get(export_invoices_handler))
         .route("/api/invoices/{id}", get(get_invoice).put(update_invoice).delete(delete_invoice))
         .route("/api/invoices/{id}/status", patch(update_invoice_status))
 }

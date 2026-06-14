@@ -1,5 +1,5 @@
 # ── Stage 1: Build ───────────────────────────────────────────────────
-FROM rust:1.75-alpine AS builder
+FROM rust:1.80-alpine AS builder
 
 RUN apk add --no-cache musl-dev pkgconf openssl-dev openssl-libs-static
 
@@ -12,6 +12,7 @@ RUN cargo build --release --bin alnasr-tech 2>/dev/null || true
 RUN rm -rf src
 
 # Build actual binary with full source
+# Note: Add --features swagger to the cargo build line below for API docs
 COPY . .
 RUN touch src/main.rs
 RUN cargo build --release --bin alnasr-tech

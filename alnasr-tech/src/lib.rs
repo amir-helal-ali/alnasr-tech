@@ -26,6 +26,8 @@ pub mod pdf;
 pub mod email_handler;
 pub mod middleware;
 pub mod csv_utils;
+#[cfg(feature = "swagger")]
+pub mod api_docs;
 
 // ── Tests ──────────────────────────────────────────────────────────────
 #[cfg(test)]

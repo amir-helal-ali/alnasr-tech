@@ -11,7 +11,8 @@ use tracing_subscriber::{fmt, EnvFilter};
 /// - Database connection with retry logic (5 attempts)
 /// - Automatic migration runner
 /// - Connection pool tuning for 5k-10k concurrent users
-/// - Graceful shutdown on SIGTERM / Ctrl+C
+/// - Graceful shutdown on SIGTERM / Ctrl+C with pool cleanup
+/// - Background rate-limiter eviction task
 /// - RBF runtime behind feature gate
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -82,9 +83,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── 7. Build the Axum router ──────────────────────────────────────
-    let app = create_router(pool.clone()).with_state(pool);
+    let app = create_router(pool.clone()).with_state(pool.clone());
 
-    // ── 8. Bind + serve with graceful shutdown ────────────────────────
+    // ── 8. Spawn background tasks ─────────────────────────────────────
+    // Rate limiter eviction: clean up expired entries every 5 minutes
+    let rate_limiter = alnasr_tech::middleware::RateLimiter::production();
+    let eviction_handle = tokio::spawn(eviction_task(rate_limiter));
+
+    // ── 9. Bind + serve with graceful shutdown ────────────────────────
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
     tracing::info!(addr = %bind_addr, "Server listening");
 
@@ -96,8 +102,29 @@ async fn main() -> anyhow::Result<()> {
             e
         })?;
 
+    // ── 10. Cleanup ──────────────────────────────────────────────────
+    // Cancel the eviction background task
+    eviction_handle.abort();
+
+    // Close the database pool gracefully
+    pool.close().await;
+    tracing::info!("Database pool closed");
+
     tracing::info!("Server shutdown complete");
     Ok(())
+}
+
+/// Background task that evicts expired rate-limiter entries periodically.
+///
+/// Runs every 5 minutes to prevent memory leaks from accumulated
+/// rate-limit entries for inactive IP addresses.
+async fn eviction_task(limiter: alnasr_tech::middleware::RateLimiter) {
+    let mut interval = tokio::time::interval(Duration::from_secs(300));
+    loop {
+        interval.tick().await;
+        limiter.evict_expired().await;
+        tracing::debug!("Rate limiter eviction sweep completed");
+    }
 }
 
 /// Connect to PostgreSQL with exponential backoff retry.

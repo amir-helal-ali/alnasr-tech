@@ -168,7 +168,7 @@ pub fn generate_invoice_pdf(data: &InvoicePdfData) -> Result<Vec<u8>, AppError> 
     // ── Save ────────────────────────────────────────────────────────
     let mut buf = BufWriter::new(Vec::new());
     doc.save(&mut buf)?;
-    Ok(buf.into_inner().map_err(|e| AppError::Internal(format!("PDF buffer error: {e}")))?)
+    buf.into_inner().map_err(|e| AppError::Internal(format!("PDF buffer error: {e}")))
 }
 
 /// Draw table header row.

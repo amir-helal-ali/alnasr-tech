@@ -102,6 +102,12 @@ pub struct AppMetrics {
     pub active_connections: Gauge,
 }
 
+impl Default for AppMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppMetrics {
     /// Create and register all standard application metrics.
     pub fn new() -> Self {
@@ -190,10 +196,17 @@ pub fn create_router(pool: PgPool) -> Router<PgPool> {
     let cors = build_cors_layer();
 
     // ── Public routes (no authentication required) ────────────────────
-    let public_routes = Router::new()
+    #[allow(unused_mut)]
+    let mut public_routes = Router::new()
         .route("/health", get(health_handler))
         .route("/metrics", get(metrics_handler))
         .merge(auth::public_router());
+
+    // Swagger UI (only when feature is enabled)
+    #[cfg(feature = "swagger")]
+    {
+        public_routes = public_routes.merge(crate::api_docs::swagger_ui());
+    }
 
     // ── Protected routes (authentication required) ────────────────────
     let protected_routes = Router::new()
@@ -207,12 +220,18 @@ pub fn create_router(pool: PgPool) -> Router<PgPool> {
         .layer(middleware::from_fn(auth_middleware));
 
     // ── Admin-only routes (authentication + admin role required) ──────
+    // Both auth_middleware and admin_only_middleware must run.
+    // auth_middleware extracts JWT claims, admin_only_middleware checks role.
+    // Layers execute bottom-to-top, so admin_only runs first on request,
+    // but since admin_only reads from extensions (populated by auth),
+    // we need auth to run BEFORE admin_only on the request path.
+    // In Axum, layers wrap like onion: outermost runs first on request.
+    // So auth_middleware must be the outer layer (applied last = runs first on request).
     let admin_routes = Router::new()
         .merge(users::router())
         .merge(tenants::router())
         .layer(middleware::from_fn(crate::middleware::admin_only_middleware))
-        // admin_only must run AFTER auth middleware, so nest inside
-        ;
+        .layer(middleware::from_fn(auth_middleware));
 
     // ── Combine all route groups ──────────────────────────────────────
     Router::new()

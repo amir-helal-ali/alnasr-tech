@@ -1,8 +1,10 @@
 use axum::{
     extract::{Path, Query, State},
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
+use http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -334,6 +336,42 @@ async fn update_customer(
     Ok(Json(customer))
 }
 
+async fn export_customers_handler(
+    State(pool): State<PgPool>,
+    claims: axum::Extension<Claims>,
+) -> Result<Response, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
+
+    let rows = sqlx::query_as::<_, CustomerResponse>(
+        "SELECT id, tenant_id, name, email, phone, address, city, country, tax_id, notes, is_active, created_at, updated_at \
+         FROM customers WHERE is_active = true AND tenant_id = $1 ORDER BY created_at DESC"
+    )
+    .bind(tenant_id)
+    .fetch_all(&pool)
+    .await?;
+
+    let csv_rows: Vec<crate::csv_utils::CustomerCsvRow> = rows
+        .into_iter()
+        .map(|c| crate::csv_utils::CustomerCsvRow {
+            name: c.name,
+            email: c.email,
+            phone: c.phone,
+            address: c.address,
+            city: c.city,
+            country: c.country,
+            tax_id: c.tax_id,
+        })
+        .collect();
+
+    let csv_bytes = crate::csv_utils::export_customers_csv(&csv_rows)?;
+
+    Ok((
+        [(CONTENT_TYPE, "text/csv; charset=utf-8"),
+         (CONTENT_DISPOSITION, "attachment; filename=\"customers.csv\"")],
+        csv_bytes,
+    ).into_response())
+}
+
 async fn delete_customer(
     State(pool): State<PgPool>,
     claims: axum::Extension<Claims>,
@@ -406,5 +444,6 @@ async fn delete_customer(
 pub fn router() -> Router<PgPool> {
     Router::new()
         .route("/api/customers", get(list_customers).post(create_customer))
+        .route("/api/customers/export", get(export_customers_handler))
         .route("/api/customers/{id}", get(get_customer).put(update_customer).delete(delete_customer))
 }

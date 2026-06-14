@@ -118,3 +118,9 @@ impl From<validator::ValidationErrors> for AppError {
         AppError::BadRequest(format!("Validation error: {err}"))
     }
 }
+
+impl From<reqwest::Error> for AppError {
+    fn from(err: reqwest::Error) -> Self {
+        AppError::Internal(format!("HTTP client error: {err}"))
+    }
+}

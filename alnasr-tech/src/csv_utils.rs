@@ -23,7 +23,7 @@ pub fn export_customers_csv(customers: &[CustomerCsvRow]) -> Result<Vec<u8>, App
         wtr.serialize(customer).map_err(|e| AppError::Internal(format!("CSV serialize error: {e}")))?;
     }
     wtr.flush().map_err(|e| AppError::Internal(format!("CSV flush error: {e}")))?;
-    Ok(wtr.into_inner().map_err(|e| AppError::Internal(format!("CSV writer error: {e}")))?)
+    wtr.into_inner().map_err(|e| AppError::Internal(format!("CSV writer error: {e}")))
 }
 
 /// Import customers from CSV bytes.
@@ -39,7 +39,7 @@ pub fn import_customers_csv(csv_data: &[u8]) -> Result<Vec<CustomerCsvRow>, AppE
 
 // ── Invoice CSV ────────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct InvoiceCsvRow {
     pub invoice_number: String,
     pub customer_name: String,
@@ -58,7 +58,7 @@ pub fn export_invoices_csv(invoices: &[InvoiceCsvRow]) -> Result<Vec<u8>, AppErr
         wtr.serialize(invoice).map_err(|e| AppError::Internal(format!("CSV serialize error: {e}")))?;
     }
     wtr.flush().map_err(|e| AppError::Internal(format!("CSV flush error: {e}")))?;
-    Ok(wtr.into_inner().map_err(|e| AppError::Internal(format!("CSV writer error: {e}")))?)
+    wtr.into_inner().map_err(|e| AppError::Internal(format!("CSV writer error: {e}")))
 }
 
 /// Import invoices from CSV bytes.
@@ -90,5 +90,5 @@ pub fn export_payments_csv(payments: &[PaymentCsvRow]) -> Result<Vec<u8>, AppErr
         wtr.serialize(payment).map_err(|e| AppError::Internal(format!("CSV serialize error: {e}")))?;
     }
     wtr.flush().map_err(|e| AppError::Internal(format!("CSV flush error: {e}")))?;
-    Ok(wtr.into_inner().map_err(|e| AppError::Internal(format!("CSV writer error: {e}")))?)
+    wtr.into_inner().map_err(|e| AppError::Internal(format!("CSV writer error: {e}")))
 }

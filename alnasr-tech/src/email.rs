@@ -106,7 +106,7 @@ pub async fn send_email_with_attachment(
                 .singlepart(
                     SinglePart::builder()
                         .header(ContentType::parse(attachment_content_type).unwrap_or_else(|_| ContentType::parse("application/pdf").unwrap()))
-                        .header(lettre::message::header::ContentDisposition::attachment(&attachment_name))
+                        .header(lettre::message::header::ContentDisposition::attachment(attachment_name))
                         .body(attachment_data.to_vec())
                 )
         )

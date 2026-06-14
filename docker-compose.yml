@@ -1,11 +1,7 @@
-version: '3.8'
-
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     container_name: alnasr-db
-    restart: unless-stopped
     environment:
       POSTGRES_DB: alnasr_tech
       POSTGRES_USER: alnasr
@@ -13,64 +9,69 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U alnasr -d alnasr_tech"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      - alnasr-network
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    shm_size: '128mb'
 
-  # Rust Backend (Axum)
   backend:
     build:
       context: ./alnasr-tech
       dockerfile: docker/Dockerfile
     container_name: alnasr-backend
-    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-3001}:3000"
     environment:
       DATABASE_URL: postgres://alnasr:${POSTGRES_PASSWORD:-alnasr_secure_2024}@postgres:5432/alnasr_tech
       JWT_SECRET: ${JWT_SECRET:-change_me_in_production_min_32_chars!}
-      RSA_PRIVATE_KEY_PATH: /app/keys/private.pem
-      RSA_PUBLIC_KEY_PATH: /app/keys/public.pem
-      ETA_CLIENT_ID: ${ETA_CLIENT_ID:-}
-      ETA_CLIENT_SECRET: ${ETA_CLIENT_SECRET:-}
-      RUST_LOG: info
-      HOST: 0.0.0.0
-      PORT: 8080
-    ports:
-      - "8080:8080"
+      JWT_EXPIRATION_SECS: ${JWT_EXPIRATION_SECS:-3600}
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 3000
+      ETA_CLIENT_ID: ${ETA_CLIENT_ID:-placeholder}
+      ETA_CLIENT_SECRET: ${ETA_CLIENT_SECRET:-placeholder}
+      ETA_TOKEN_URL: ${ETA_TOKEN_URL:-https://id.preprod.eta.gov.eg/connect/token}
+      ETA_SUBMISSION_URL: ${ETA_SUBMISSION_URL:-https://api.preprod.eta.gov.eg/api/v1/documentsubmissions}
+      SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-noreply@alnasr.tech}
+      SMTP_PASS: ${SMTP_PASS:-change_me}
+      SMTP_FROM: ${SMTP_FROM:-Al-Nasr Tech <noreply@alnasr.tech>}
+      RUST_LOG: ${RUST_LOG:-info,sqlx=warn,tower_http=warn}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./alnasr-tech/keys:/app/keys:ro
-    networks:
-      - alnasr-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
 
-  # Next.js Frontend
   frontend:
     build:
-      context: .
+      context: ./alnasr-tech/frontend
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_API_URL is embedded at build time and used by the browser.
+        # Must be a URL the browser can reach — NOT a Docker-internal hostname.
+        NEXT_PUBLIC_API_URL: "http://localhost:${BACKEND_PORT:-3001}"
     container_name: alnasr-frontend
-    restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_URL: http://backend:8080
-      BACKEND_URL: http://backend:8080
-      NODE_ENV: production
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      # Runtime env for the Node server (not embedded in client bundle)
+      NEXT_PUBLIC_API_URL: "http://localhost:${BACKEND_PORT:-3001}"
     depends_on:
-      - backend
-    networks:
-      - alnasr-network
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
-    driver: local
-
-networks:
-  alnasr-network:
-    driver: bridge
+  pgdata:

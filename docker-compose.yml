@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: alnasr-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: alnasr_tech
+      POSTGRES_USER: alnasr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-alnasr_secure_2024}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alnasr -d alnasr_tech"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - alnasr-network
+
+  # Rust Backend (Axum)
+  backend:
+    build:
+      context: ./alnasr-tech
+      dockerfile: docker/Dockerfile
+    container_name: alnasr-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://alnasr:${POSTGRES_PASSWORD:-alnasr_secure_2024}@postgres:5432/alnasr_tech
+      JWT_SECRET: ${JWT_SECRET:-change_me_in_production_min_32_chars!}
+      RSA_PRIVATE_KEY_PATH: /app/keys/private.pem
+      RSA_PUBLIC_KEY_PATH: /app/keys/public.pem
+      ETA_CLIENT_ID: ${ETA_CLIENT_ID:-}
+      ETA_CLIENT_SECRET: ${ETA_CLIENT_SECRET:-}
+      RUST_LOG: info
+      HOST: 0.0.0.0
+      PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./alnasr-tech/keys:/app/keys:ro
+    networks:
+      - alnasr-network
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alnasr-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8080
+      BACKEND_URL: http://backend:8080
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - alnasr-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  alnasr-network:
+    driver: bridge

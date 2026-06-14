@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080';
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,7 +14,33 @@ export async function GET(request: NextRequest) {
 
     const token = authHeader.replace('Bearer ', '');
 
-    // Extract user ID from our custom access token format: at_{userId}_{random}
+    // Try Rust backend first
+    try {
+      const backendRes = await fetch(`${BACKEND_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(3000),
+      });
+
+      if (backendRes.ok) {
+        const data = await backendRes.json();
+        return NextResponse.json(data);
+      }
+
+      // Backend returned error
+      if (backendRes.status === 401) {
+        return NextResponse.json(
+          { message: 'غير مصرح' },
+          { status: 401 }
+        );
+      }
+      // Fall through to demo mode on other errors
+    } catch {
+      console.warn('Backend unreachable, using demo mode');
+    }
+
+    // Demo mode fallback
+    const { db } = await import('@/lib/db');
+
     if (!token.startsWith('at_')) {
       return NextResponse.json(
         { message: 'رمز غير صالح' },

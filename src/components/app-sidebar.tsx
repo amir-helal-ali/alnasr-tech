@@ -16,6 +16,7 @@ import {
   ClipboardList,
   BarChart3,
   Settings,
+  UserCircle,
   ChevronRight,
   ChevronLeft,
   LogOut,
@@ -158,6 +159,12 @@ export function AppSidebar() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align={isRtl ? 'start' : 'end'} className="w-48">
+            <DropdownMenuItem asChild>
+              <Link href="/profile" className="flex items-center gap-2">
+                <UserCircle className="h-4 w-4" />
+                {language === 'ar' ? 'الملف الشخصي' : 'Profile'}
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/settings" className="flex items-center gap-2">
                 <Settings className="h-4 w-4" />

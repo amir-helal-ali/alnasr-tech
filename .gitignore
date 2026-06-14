@@ -70,3 +70,15 @@ mini-services/
 
 # Database
 db/
+
+# Tool results
+tool-results/
+
+# Examples
+examples/
+
+# Download
+ download/
+
+# Worklog
+worklog.md

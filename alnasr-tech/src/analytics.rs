@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
 use crate::error::AppError;
-use crate::middleware::Claims;
 
 // ── Types ───────────────────────────────────────────────────────────────
 

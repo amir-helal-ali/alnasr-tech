@@ -1,0 +1,28 @@
+# Build
+target/
+debug/
+**/*.pdb
+**/*.exp
+**/*.lib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log

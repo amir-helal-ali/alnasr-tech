@@ -9,7 +9,6 @@ use argon2::{
 };
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -82,6 +81,7 @@ struct UserRow {
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
+#[allow(dead_code)]
 struct RefreshTokenRow {
     id: Uuid,
     user_id: Uuid,

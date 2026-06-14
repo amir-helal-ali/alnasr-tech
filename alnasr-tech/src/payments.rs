@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    routing::{get, post},
+    routing::get,
     Json, Router,
 };
 use rust_decimal::Decimal;
@@ -9,7 +9,6 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::middleware::Claims;
 
 // ── Types ───────────────────────────────────────────────────────────────
 

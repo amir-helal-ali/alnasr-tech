@@ -8,7 +8,6 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::middleware::Claims;
 
 // ── Types ───────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    routing::{delete, get, post, put},
+    routing::get,
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,6 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::middleware::Claims;
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -210,21 +209,7 @@ async fn update_customer(
 ) -> Result<Json<CustomerResponse>, AppError> {
     let now = chrono::Utc::now();
 
-    // Build dynamic UPDATE query
-    let mut set_clauses: Vec<String> = Vec::new();
-    let mut param_idx = 2u32; // $1 is id
-    let mut bindings: Vec<(String, Box<dyn std::any::Any + Send>)> = Vec::new();
-
-    macro_rules! maybe_set {
-        ($field:expr, $val:expr) => {
-            if let Some(ref v) = $val {
-                set_clauses.push(format!("{} = ${}", $field, param_idx));
-                param_idx += 1;
-            }
-        };
-    }
-
-    // Simplified: just update all fields at once
+    // Simplified: update all fields at once using COALESCE for partial updates
     sqlx::query(
         "UPDATE customers SET name = COALESCE($2, name), email = COALESCE($3, email), \
          phone = COALESCE($4, phone), address = COALESCE($5, address), city = COALESCE($6, city), \

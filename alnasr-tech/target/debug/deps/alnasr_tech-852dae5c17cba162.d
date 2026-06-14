@@ -5,3 +5,5 @@
 src/main.rs:
 /home/z/my-project/alnasr-tech/migrations/00000000000000_initial.sql:
 /home/z/my-project/alnasr-tech/migrations/20240101000000_initial_schema.sql:
+
+# env-dep:CARGO_PKG_VERSION=0.1.0

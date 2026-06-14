@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    routing::{delete, get, post, put},
+    routing::get,
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,6 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::middleware::Claims;
 
 // ── Types ───────────────────────────────────────────────────────────────
 

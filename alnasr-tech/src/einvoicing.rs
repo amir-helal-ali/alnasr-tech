@@ -12,7 +12,6 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::middleware::Claims;
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -168,7 +167,7 @@ async fn submit_invoice(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let (_, invoice_number, customer_id, status, subtotal, tax_total, total) = &invoice;
+    let (_, _invoice_number, _customer_id, status, _subtotal, _tax_total, _total) = &invoice;
 
     if status != "issued" && status != "draft" {
         return Err(AppError::BadRequest("Invoice must be in issued status to submit to ETA".into()));

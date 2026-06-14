@@ -34,6 +34,13 @@ description = "Al-Nasr Tech ERP + E-Invoicing System"
 default = []
 rbf = ["dep:wasmtime", "dep:wasmtime-wasi"]
 
+[profile.release]
+opt-level = "z"          # Optimize for size
+lto = true               # Link-time optimization
+codegen-units = 1        # Better optimization, slower compile
+panic = "abort"          # Smaller binary, no unwinding
+strip = true             # Strip debug symbols
+
 [dependencies]
 # Serialization
 serde = { workspace = true }

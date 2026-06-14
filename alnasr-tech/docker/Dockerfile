@@ -19,7 +19,7 @@ RUN cargo build --release --bin alnasr-tech
 # ── Stage 2: Runtime ────────────────────────────────────────────────
 FROM alpine:3.19
 
-# Security: install only what's needed, set timezone
+# Security: install only what's needed, set timezone to Cairo
 RUN apk add --no-cache ca-certificates tzdata curl && \
     cp /usr/share/zoneinfo/Africa/Cairo /etc/localtime && \
     echo "Africa/Cairo" > /etc/timezone && \

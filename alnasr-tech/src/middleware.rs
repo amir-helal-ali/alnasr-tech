@@ -1,10 +1,7 @@
 use axum::{
-    extract::State,
-    http::StatusCode,
     middleware::Next,
     body::Body,
-    response::{IntoResponse, Response},
-    Extension,
+    response::Response,
 };
 use http::request::Request;
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
@@ -15,7 +12,6 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 
 use crate::error::AppError;
-use sqlx::PgPool;
 
 // ═══════════════════════════════════════════════════════════════════════
 // JWT Claims – Core authentication identity
@@ -101,6 +97,9 @@ pub async fn auth_middleware(
 }
 
 /// Middleware that requires the authenticated user to have the "admin" role.
+///
+/// Must be layered AFTER `auth_middleware` so that `Claims` are already
+/// present in the request extensions.
 pub async fn admin_only_middleware(req: Request<Body>, next: Next) -> Result<Response, AppError> {
     let claims = req
         .extensions()

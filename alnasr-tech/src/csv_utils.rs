@@ -1,9 +1,7 @@
 //! CSV export/import utilities for invoices and customers.
 
 use crate::error::AppError;
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // ── Customer CSV ───────────────────────────────────────────────────────
 

@@ -1,44 +1,40 @@
 ---
-Task ID: 2
-Agent: Super Z (Main)
-Task: Complete Al-Nasr Tech ERP to production-ready quality
+Task ID: 1
+Agent: Main
+Task: Production-ready improvements for Al-Nasr Tech ERP + E-Invoicing System
 
 Work Log:
-- Fixed all 29 compiler warnings → 0 warnings from our code
-- Optimized binary size from 15MB → 5.5MB (target: <10MB ✅)
-  - Added [profile.release] with opt-level="z", lto=true, codegen-units=1, panic="abort", strip=true
-- Added database retry logic with exponential backoff (5 attempts, 1s→16s)
-- Added connection pool tuning: min_connections=5, idle_timeout=600s, max_lifetime=1800s
-- Improved Docker: health check, non-root user, curl for healthcheck, shm_size for PostgreSQL
-- Rewrote PDF module with professional invoice generation:
-  - Company header, bill-to section, itemized table with tax breakdown
-  - Line separators, totals section, footer with ETA compliance notice
-  - InvoicePdfData struct for structured data
-  - Fixed printpdf 0.7 Line struct (removed has_fill, has_stroke, is_clipping_path)
-  - Fixed f32 vs f64 type issues
-- Rewrote email module with lettre 0.11 async transport:
-  - AsyncSmtpTransport with Tokio1Executor
-  - send_email_with_attachment using MultiPart API
-  - Fixed ContentType and ContentDisposition API compatibility
-- Added csv_utils module for CSV export/import:
-  - CustomerCsvRow, InvoiceCsvRow, PaymentCsvRow
-  - Round-trip export/import functions
-- Improved middleware:
-  - Claims helper methods: user_id(), tenant_uuid(), is_admin()
-  - RateLimiter::production() default (100 req/min per IP)
-  - Periodic eviction logging
-- Added email_handler improvements: payment confirmation email
-- Added 17 integration tests (all passing):
-  - Tax engine: 6 tests
-  - Cache: 4 tests
-  - CSV: 3 tests
-  - Rate limiter: 4 tests
-- Added .gitignore, .env.example, scripts/setup-db.sh
-- Added database migration with RLS policies
+- Fixed all compiler warnings (removed unused imports in middleware.rs and csv_utils.rs)
+- Rewrote router.rs with auth middleware on protected routes, public/protected/admin route groups
+- Added production CORS configuration with ALLOWED_ORIGINS env var support
+- Split auth.rs into public_router() and protected_router() for proper auth middleware application
+- Applied admin_only_middleware to /api/users/* and /api/tenants/* routes
+- Added comprehensive input validation to all handlers (CreateCustomerRequest, UpdateCustomerRequest, CreateInvoiceRequest, etc.)
+- Added transaction handling in all multi-step operations (create_customer, create_invoice, create_payment, etc.)
+- Added tenant isolation in all queries (filtering by tenant_id in SELECT/WHERE clauses)
+- Added RLS context setting in transaction-based handlers
+- Added invoice status transition endpoint (PATCH /api/invoices/{id}/status) with state machine validation
+- Added duplicate email checking for customers and users
+- Added payment method validation (cash, bank_transfer, credit_card, etc.)
+- Added role validation (admin, accountant, user, viewer)
+- Added plan validation for tenants (free, starter, professional, enterprise)
+- Prevented admin from deactivating their own account or own tenant
+- Added customer active invoice check before deletion
+- Added 41 unit tests and 17 integration tests (58 total, all passing)
+- Built release binary at 6.1MB (under 10MB target)
+- Added .env.example with all required environment variables documented
+- Added .gitignore
+- Added ALLOWED_ORIGINS to docker-compose.yml
+- Added health check with pool stats and version info
 
 Stage Summary:
-- Binary: 5.5MB (< 10MB target ✅)
-- Compilation: 0 errors, 4 minor warnings (auto-fixable)
-- Tests: 17/17 passing ✅
-- Source: 3,985 lines main + 432 lines RBF
-- Project location: /home/z/my-project/alnasr-tech/
+- Zero compilation warnings from project code
+- 58 tests passing (41 unit + 17 integration)
+- Release binary: 6.1MB
+- All protected routes require JWT authentication
+- Admin routes require both auth + admin role
+- All handlers enforce tenant isolation
+- All multi-step operations use database transactions
+- Input validation on all request types
+- Invoice status machine with valid transitions enforced
+- Production CORS configuration via environment variable

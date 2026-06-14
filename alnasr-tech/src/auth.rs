@@ -22,7 +22,7 @@ use crate::middleware::Claims;
 pub struct LoginRequest {
     #[validate(email)]
     pub email: String,
-    #[validate(length(min = 8))]
+    #[validate(length(min = 8, message = "Password must be at least 8 characters"))]
     pub password: String,
 }
 
@@ -30,23 +30,24 @@ pub struct LoginRequest {
 pub struct RegisterRequest {
     #[validate(email)]
     pub email: String,
-    #[validate(length(min = 8))]
+    #[validate(length(min = 8, message = "Password must be at least 8 characters"))]
     pub password: String,
-    #[validate(length(min = 2))]
+    #[validate(length(min = 2, message = "Name must be at least 2 characters"))]
     pub name: String,
     pub tenant_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, validator::Validate)]
 pub struct RefreshRequest {
+    #[validate(length(min = 1, message = "Refresh token is required"))]
     pub refresh_token: String,
 }
 
 #[derive(Debug, Deserialize, validator::Validate)]
 pub struct ChangePasswordRequest {
-    #[validate(length(min = 8))]
+    #[validate(length(min = 8, message = "Current password must be at least 8 characters"))]
     pub old_password: String,
-    #[validate(length(min = 8))]
+    #[validate(length(min = 8, message = "New password must be at least 8 characters"))]
     pub new_password: String,
 }
 
@@ -154,12 +155,19 @@ fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
         .is_ok())
 }
 
+/// Validate request and return early if validation fails.
+fn validate_request<T: validator::Validate>(req: &T) -> Result<(), AppError> {
+    req.validate().map_err(AppError::from)
+}
+
 // ── Route handlers ──────────────────────────────────────────────────────
 
 async fn login_handler(
     State(pool): State<PgPool>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    validate_request(&req)?;
+
     let user = sqlx::query_as::<_, UserRow>(
         "SELECT id, email, password_hash, name, tenant_id, role, is_active, created_at, updated_at \
          FROM users WHERE email = $1 AND is_active = true"
@@ -167,15 +175,23 @@ async fn login_handler(
     .bind(&req.email)
     .fetch_optional(&pool)
     .await?
-    .ok_or(AppError::Unauthorized)?;
+    .ok_or_else(|| {
+        // Deliberately vague error to prevent email enumeration
+        AppError::Unauthorized
+    })?;
 
     if !verify_password(&req.password, &user.password_hash)? {
+        // Rate limiting should be applied at the middleware level
+        // but we also log failed attempts here
+        tracing::warn!(email = %req.email, "Failed login attempt");
         return Err(AppError::Unauthorized);
     }
 
     let (token, refresh_token) = create_token(&user)?;
 
-    // Store refresh token hash
+    // Store refresh token hash in a transaction
+    let mut tx = pool.begin().await?;
+
     let token_hash = sha2::Sha256::digest(refresh_token.as_bytes());
     let token_hash_hex = format!("{:x}", token_hash);
     sqlx::query(
@@ -185,8 +201,10 @@ async fn login_handler(
     .bind(user.id)
     .bind(&token_hash_hex)
     .bind(Utc::now() + Duration::days(7))
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     tracing::info!(user_id = %user.id, "User logged in successfully");
 
@@ -208,6 +226,8 @@ async fn register_handler(
     State(pool): State<PgPool>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    validate_request(&req)?;
+
     // Check if email already exists
     let existing = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM users WHERE email = $1"
@@ -225,6 +245,9 @@ async fn register_handler(
     let tenant_id = req.tenant_id.unwrap_or_else(Uuid::new_v4);
     let now = Utc::now();
 
+    // Use transaction for atomic tenant + user creation
+    let mut tx = pool.begin().await?;
+
     // Create tenant if not provided
     if req.tenant_id.is_none() {
         sqlx::query(
@@ -236,7 +259,7 @@ async fn register_handler(
         .bind(true)
         .bind(now)
         .bind(now)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
     }
 
@@ -253,8 +276,10 @@ async fn register_handler(
     .bind(true)
     .bind(now)
     .bind(now)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     let user = UserRow {
         id: user_id,
@@ -269,6 +294,19 @@ async fn register_handler(
     };
 
     let (token, refresh_token) = create_token(&user)?;
+
+    // Store refresh token
+    let token_hash = sha2::Sha256::digest(refresh_token.as_bytes());
+    let token_hash_hex = format!("{:x}", token_hash);
+    sqlx::query(
+        "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)"
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(&token_hash_hex)
+    .bind(Utc::now() + Duration::days(7))
+    .execute(&pool)
+    .await?;
 
     tracing::info!(user_id = %user_id, tenant_id = %tenant_id, "New user registered");
 
@@ -290,6 +328,8 @@ async fn refresh_handler(
     State(pool): State<PgPool>,
     Json(req): Json<RefreshRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    validate_request(&req)?;
+
     let token_data = decode::<Claims>(
         &req.refresh_token,
         &DecodingKey::from_secret(jwt_secret().as_bytes()),
@@ -299,7 +339,9 @@ async fn refresh_handler(
 
     let user_id: Uuid = token_data.claims.sub.parse().map_err(|_| AppError::Unauthorized)?;
 
-    // Verify refresh token is in DB
+    // Verify refresh token is in DB (transaction for rotation atomicity)
+    let mut tx = pool.begin().await?;
+
     let token_hash = sha2::Sha256::digest(req.refresh_token.as_bytes());
     let token_hash_hex = format!("{:x}", token_hash);
     let stored = sqlx::query_scalar::<_, i64>(
@@ -307,10 +349,11 @@ async fn refresh_handler(
     )
     .bind(user_id)
     .bind(&token_hash_hex)
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await?;
 
     if stored == 0 {
+        tx.commit().await?;
         return Err(AppError::Unauthorized);
     }
 
@@ -319,14 +362,14 @@ async fn refresh_handler(
          FROM users WHERE id = $1 AND is_active = true"
     )
     .bind(user_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::Unauthorized)?;
 
     // Delete old refresh token (rotation)
     sqlx::query("DELETE FROM refresh_tokens WHERE token_hash = $1")
         .bind(&token_hash_hex)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
 
     let (token, new_refresh_token) = create_token(&user)?;
@@ -341,8 +384,10 @@ async fn refresh_handler(
     .bind(user.id)
     .bind(&new_token_hash_hex)
     .bind(Utc::now() + Duration::days(7))
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     Ok(Json(AuthResponse {
         token,
@@ -388,14 +433,23 @@ async fn change_password_handler(
     claims: axum::Extension<crate::middleware::Claims>,
     Json(req): Json<ChangePasswordRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    validate_request(&req)?;
+
+    // Verify new password differs from old password
+    if req.old_password == req.new_password {
+        return Err(AppError::BadRequest("New password must differ from current password".into()));
+    }
+
     let user_id: Uuid = claims.sub.parse().map_err(|_| AppError::Unauthorized)?;
+
+    let mut tx = pool.begin().await?;
 
     let user = sqlx::query_as::<_, UserRow>(
         "SELECT id, email, password_hash, name, tenant_id, role, is_active, created_at, updated_at \
          FROM users WHERE id = $1"
     )
     .bind(user_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
 
@@ -408,27 +462,37 @@ async fn change_password_handler(
     sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
         .bind(&new_hash)
         .bind(user_id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
 
-    // Invalidate all refresh tokens (force re-login)
+    // Invalidate all refresh tokens (force re-login on other devices)
     sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
         .bind(user_id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
+
+    tx.commit().await?;
 
     tracing::info!(user_id = %user_id, "Password changed successfully");
 
     Ok(Json(serde_json::json!({ "message": "Password changed successfully" })))
 }
 
-// ── Router ──────────────────────────────────────────────────────────────
+// ── Routers ─────────────────────────────────────────────────────────────
 
-pub fn router() -> Router<PgPool> {
+/// Public auth routes that do NOT require authentication.
+/// These are merged directly into the public route group.
+pub fn public_router() -> Router<PgPool> {
     Router::new()
         .route("/api/auth/login", post(login_handler))
         .route("/api/auth/register", post(register_handler))
         .route("/api/auth/refresh", post(refresh_handler))
+}
+
+/// Protected auth routes that REQUIRE authentication.
+/// These are merged into the protected route group (behind auth middleware).
+pub fn protected_router() -> Router<PgPool> {
+    Router::new()
         .route("/api/auth/me", get(me_handler))
         .route("/api/auth/change-password", put(change_password_handler))
 }

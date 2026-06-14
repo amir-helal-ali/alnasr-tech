@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    routing::get,
+    routing::{get, patch},
     Json, Router,
 };
 use rust_decimal::Decimal;
@@ -9,21 +9,40 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::middleware::Claims;
 use crate::tax;
 
 // ── Types ───────────────────────────────────────────────────────────────
 
+/// Valid invoice statuses for state machine transitions.
+const VALID_STATUSES: &[&str] = &["draft", "issued", "submitted", "accepted", "partial", "paid", "cancelled"];
+
+/// Valid transitions from each status.
+pub fn valid_transitions(current: &str) -> &[&str] {
+    match current {
+        "draft" => &["issued", "cancelled"],
+        "issued" => &["submitted", "cancelled"],
+        "submitted" => &["accepted", "cancelled"],
+        "accepted" => &["paid", "cancelled"],
+        "partial" => &["paid", "cancelled"],
+        "paid" => &[],
+        "cancelled" => &[],
+        _ => &[],
+    }
+}
+
 #[derive(Debug, Deserialize, validator::Validate)]
 pub struct CreateInvoiceRequest {
     pub customer_id: Uuid,
+    #[validate(length(min = 1, message = "Invoice must have at least one line item"))]
     pub items: Vec<InvoiceLineItemRequest>,
     pub due_date: Option<chrono::DateTime<chrono::Utc>>,
     pub notes: Option<String>,
 }
 
-#[derive(Debug, Deserialize, validator::Validate)]
+#[derive(Debug, Deserialize, Serialize, validator::Validate)]
 pub struct InvoiceLineItemRequest {
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1, message = "Description is required"))]
     pub description: String,
     pub quantity: Decimal,
     pub unit_price: Decimal,
@@ -36,6 +55,11 @@ pub struct ListInvoicesQuery {
     pub per_page: Option<i64>,
     pub status: Option<String>,
     pub customer_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateInvoiceStatusRequest {
+    pub status: String,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -84,24 +108,48 @@ pub struct InvoiceListResponse {
     pub per_page: i64,
 }
 
+/// Validate request and return early if validation fails.
+fn validate_request<T: validator::Validate>(req: &T) -> Result<(), AppError> {
+    req.validate().map_err(AppError::from)
+}
+
+/// Validate line item amounts.
+fn validate_line_items(items: &[InvoiceLineItemRequest]) -> Result<(), AppError> {
+    for item in items {
+        if item.quantity <= Decimal::ZERO {
+            return Err(AppError::BadRequest("Quantity must be positive".into()));
+        }
+        if item.unit_price < Decimal::ZERO {
+            return Err(AppError::BadRequest("Unit price cannot be negative".into()));
+        }
+        if let Some(rate) = item.tax_rate {
+            if rate < Decimal::ZERO || rate > Decimal::new(100, 0) {
+                return Err(AppError::BadRequest("Tax rate must be between 0 and 100".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────
 
 async fn list_invoices(
     State(pool): State<PgPool>,
-    _claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Query(params): Query<ListInvoicesQuery>,
 ) -> Result<Json<InvoiceListResponse>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(20).min(100);
     let offset = (page - 1) * per_page;
 
     let mut query_str = String::from(
         "SELECT id, tenant_id, invoice_number, customer_id, status, subtotal, tax_total, total, \
-         due_date, notes, issued_at, paid_at, created_at, updated_at FROM invoices WHERE 1=1"
+         due_date, notes, issued_at, paid_at, created_at, updated_at FROM invoices WHERE tenant_id = $1"
     );
-    let mut count_str = String::from("SELECT COUNT(*) FROM invoices WHERE 1=1");
+    let mut count_str = String::from("SELECT COUNT(*) FROM invoices WHERE tenant_id = $1");
 
-    let mut bind_idx = 1u32;
+    let mut bind_idx = 2u32;
 
     if params.status.is_some() {
         query_str.push_str(&format!(" AND status = ${bind_idx}"));
@@ -118,6 +166,9 @@ async fn list_invoices(
 
     let mut q = sqlx::query_as::<_, InvoiceResponse>(&query_str);
     let mut cq = sqlx::query_scalar::<_, i64>(&count_str);
+
+    q = q.bind(tenant_id);
+    cq = cq.bind(tenant_id);
 
     if let Some(ref status) = params.status {
         q = q.bind(status);
@@ -138,19 +189,39 @@ async fn list_invoices(
 
 async fn create_invoice(
     State(pool): State<PgPool>,
-    claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Json(req): Json<CreateInvoiceRequest>,
 ) -> Result<Json<InvoiceDetailResponse>, AppError> {
-    let tenant_id: Uuid = claims.tenant_id.parse().map_err(|_| AppError::BadRequest("Invalid tenant".into()))?;
+    validate_request(&req)?;
+    validate_line_items(&req.items)?;
+
+    let tenant_id = claims.tenant_uuid()?;
+    let user_id = claims.user_id()?;
     let invoice_id = Uuid::new_v4();
     let now = chrono::Utc::now();
+
+    let mut tx = pool.begin().await?;
+    crate::middleware::set_rls_context(&mut tx, tenant_id, user_id).await?;
+
+    // Verify customer belongs to this tenant
+    let customer_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM customers WHERE id = $1 AND tenant_id = $2 AND is_active = true"
+    )
+    .bind(req.customer_id)
+    .bind(tenant_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if customer_exists == 0 {
+        return Err(AppError::BadRequest("Customer not found or does not belong to your organization".into()));
+    }
 
     // Generate invoice number: INV-YYYYMMDD-XXXX
     let date_str = now.format("%Y%m%d");
     let seq: (i64,) = sqlx::query_as("SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_number FROM 14 FOR 4) AS INTEGER)), 0) + 1 FROM invoices WHERE tenant_id = $1 AND invoice_number LIKE $2")
         .bind(tenant_id)
         .bind(format!("INV-{date_str}-%"))
-        .fetch_one(&pool)
+        .fetch_one(&mut *tx)
         .await?;
     let invoice_number = format!("INV-{date_str}-{:04}", seq.0);
 
@@ -203,7 +274,7 @@ async fn create_invoice(
     .bind(now)
     .bind(now)
     .bind(now)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
 
     // Insert line items
@@ -221,12 +292,11 @@ async fn create_invoice(
         .bind(item.subtotal)
         .bind(item.tax_amount)
         .bind(item.total)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
     }
 
     // Audit
-    let user_id: Uuid = claims.sub.parse().unwrap_or_else(|_| Uuid::nil());
     sqlx::query(
         "INSERT INTO audit_logs (id, tenant_id, user_id, action, entity_type, entity_id, details, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
@@ -239,8 +309,10 @@ async fn create_invoice(
     .bind(invoice_id)
     .bind(serde_json::json!({"invoice_number": invoice_number, "total": total.to_string()}).to_string())
     .bind(now)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     let invoice = sqlx::query_as::<_, InvoiceResponse>(
         "SELECT id, tenant_id, invoice_number, customer_id, status, subtotal, tax_total, total, \
@@ -255,14 +327,17 @@ async fn create_invoice(
 
 async fn get_invoice(
     State(pool): State<PgPool>,
-    _claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<InvoiceDetailResponse>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
+
     let invoice = sqlx::query_as::<_, InvoiceResponse>(
         "SELECT id, tenant_id, invoice_number, customer_id, status, subtotal, tax_total, total, \
-         due_date, notes, issued_at, paid_at, created_at, updated_at FROM invoices WHERE id = $1"
+         due_date, notes, issued_at, paid_at, created_at, updated_at FROM invoices WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)
+    .bind(tenant_id)
     .fetch_optional(&pool)
     .await?
     .ok_or(AppError::NotFound)?;
@@ -280,23 +355,45 @@ async fn get_invoice(
 
 async fn update_invoice(
     State(pool): State<PgPool>,
-    claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Path(id): Path<Uuid>,
     Json(req): Json<CreateInvoiceRequest>,
 ) -> Result<Json<InvoiceDetailResponse>, AppError> {
+    validate_request(&req)?;
+    validate_line_items(&req.items)?;
+
+    let tenant_id = claims.tenant_uuid()?;
+    let user_id = claims.user_id()?;
     let now = chrono::Utc::now();
 
-    // Verify invoice is in draft status
+    let mut tx = pool.begin().await?;
+    crate::middleware::set_rls_context(&mut tx, tenant_id, user_id).await?;
+
+    // Verify invoice is in draft status and belongs to tenant
     let current = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM invoices WHERE id = $1"
+        "SELECT status FROM invoices WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)
-    .fetch_optional(&pool)
+    .bind(tenant_id)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
 
     if current != "draft" {
         return Err(AppError::BadRequest("Only draft invoices can be updated".into()));
+    }
+
+    // Verify customer belongs to this tenant
+    let customer_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM customers WHERE id = $1 AND tenant_id = $2 AND is_active = true"
+    )
+    .bind(req.customer_id)
+    .bind(tenant_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if customer_exists == 0 {
+        return Err(AppError::BadRequest("Customer not found or does not belong to your organization".into()));
     }
 
     // Recalculate totals
@@ -342,13 +439,13 @@ async fn update_invoice(
     .bind(&req.notes)
     .bind(now)
     .bind(id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
 
     // Delete old items and insert new ones
     sqlx::query("DELETE FROM invoice_line_items WHERE invoice_id = $1")
         .bind(id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
 
     for item in &line_items {
@@ -365,13 +462,11 @@ async fn update_invoice(
         .bind(item.subtotal)
         .bind(item.tax_amount)
         .bind(item.total)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
     }
 
     // Audit
-    let tenant_id: Uuid = claims.tenant_id.parse().unwrap_or_else(|_| Uuid::nil());
-    let user_id: Uuid = claims.sub.parse().unwrap_or_else(|_| Uuid::nil());
     sqlx::query(
         "INSERT INTO audit_logs (id, tenant_id, user_id, action, entity_type, entity_id, details, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
@@ -384,8 +479,10 @@ async fn update_invoice(
     .bind(id)
     .bind("{\"action\": \"updated_line_items\"}")
     .bind(now)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     let invoice = sqlx::query_as::<_, InvoiceResponse>(
         "SELECT id, tenant_id, invoice_number, customer_id, status, subtotal, tax_total, total, \
@@ -398,16 +495,121 @@ async fn update_invoice(
     Ok(Json(InvoiceDetailResponse { invoice, items: line_items }))
 }
 
-async fn delete_invoice(
+/// Update invoice status with state machine validation.
+async fn update_invoice_status(
     State(pool): State<PgPool>,
-    claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Path(id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, AppError> {
+    Json(req): Json<UpdateInvoiceStatusRequest>,
+) -> Result<Json<InvoiceDetailResponse>, AppError> {
+    // Validate target status
+    if !VALID_STATUSES.contains(&req.status.as_str()) {
+        return Err(AppError::BadRequest(
+            format!("Invalid status '{}'. Valid statuses: {}", req.status, VALID_STATUSES.join(", "))
+        ));
+    }
+
+    let tenant_id = claims.tenant_uuid()?;
+    let user_id = claims.user_id()?;
+    let now = chrono::Utc::now();
+
+    let mut tx = pool.begin().await?;
+    crate::middleware::set_rls_context(&mut tx, tenant_id, user_id).await?;
+
     let current = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM invoices WHERE id = $1"
+        "SELECT status FROM invoices WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)
-    .fetch_optional(&pool)
+    .bind(tenant_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    // Validate transition
+    let allowed = valid_transitions(&current);
+    if !allowed.contains(&req.status.as_str()) {
+        return Err(AppError::BadRequest(
+            format!("Cannot transition invoice from '{}' to '{}'. Allowed transitions: {}", current, req.status, allowed.join(", "))
+        ));
+    }
+
+    // If issuing, set issued_at if not already set
+    let issued_at_update = if req.status == "issued" && current == "draft" {
+        ", issued_at = COALESCE(issued_at, $3)"
+    } else {
+        ""
+    };
+
+    let query_str = format!(
+        "UPDATE invoices SET status = $1, updated_at = $2{issued_at_update} WHERE id = $4"
+    );
+
+    let mut q = sqlx::query(&query_str)
+        .bind(&req.status)
+        .bind(now);
+
+    if req.status == "issued" && current == "draft" {
+        q = q.bind(now);
+    }
+
+    q = q.bind(id);
+    q.execute(&mut *tx).await?;
+
+    // Audit
+    sqlx::query(
+        "INSERT INTO audit_logs (id, tenant_id, user_id, action, entity_type, entity_id, details, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id)
+    .bind(user_id)
+    .bind(format!("invoice_status_{}", req.status))
+    .bind("invoice")
+    .bind(id)
+    .bind(serde_json::json!({"from": current, "to": req.status}).to_string())
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    let invoice = sqlx::query_as::<_, InvoiceResponse>(
+        "SELECT id, tenant_id, invoice_number, customer_id, status, subtotal, tax_total, total, \
+         due_date, notes, issued_at, paid_at, created_at, updated_at FROM invoices WHERE id = $1"
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await?;
+
+    let items = sqlx::query_as::<_, InvoiceLineItem>(
+        "SELECT id, invoice_id, description, quantity, unit_price, tax_rate, subtotal, tax_amount, total \
+         FROM invoice_line_items WHERE invoice_id = $1 ORDER BY id"
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await?;
+
+    Ok(Json(InvoiceDetailResponse { invoice, items }))
+}
+
+async fn delete_invoice(
+    State(pool): State<PgPool>,
+    claims: axum::Extension<Claims>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
+    let user_id = claims.user_id()?;
+    let now = chrono::Utc::now();
+
+    let mut tx = pool.begin().await?;
+    crate::middleware::set_rls_context(&mut tx, tenant_id, user_id).await?;
+
+    let current = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM invoices WHERE id = $1 AND tenant_id = $2"
+    )
+    .bind(id)
+    .bind(tenant_id)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
 
@@ -415,19 +617,18 @@ async fn delete_invoice(
         return Err(AppError::BadRequest("Only draft invoices can be deleted".into()));
     }
 
+    // Delete line items first (cascade should handle this, but be explicit)
     sqlx::query("DELETE FROM invoice_line_items WHERE invoice_id = $1")
         .bind(id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
 
     sqlx::query("DELETE FROM invoices WHERE id = $1")
         .bind(id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
 
     // Audit
-    let tenant_id: Uuid = claims.tenant_id.parse().unwrap_or_else(|_| Uuid::nil());
-    let user_id: Uuid = claims.sub.parse().unwrap_or_else(|_| Uuid::nil());
     sqlx::query(
         "INSERT INTO audit_logs (id, tenant_id, user_id, action, entity_type, entity_id, details, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
@@ -439,9 +640,11 @@ async fn delete_invoice(
     .bind("invoice")
     .bind(id)
     .bind("{\"action\": \"hard_delete\"}")
-    .bind(chrono::Utc::now())
-    .execute(&pool)
+    .bind(now)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     Ok(Json(serde_json::json!({ "message": "Invoice deleted" })))
 }
@@ -452,4 +655,5 @@ pub fn router() -> Router<PgPool> {
     Router::new()
         .route("/api/invoices", get(list_invoices).post(create_invoice))
         .route("/api/invoices/{id}", get(get_invoice).put(update_invoice).delete(delete_invoice))
+        .route("/api/invoices/{id}/status", patch(update_invoice_status))
 }

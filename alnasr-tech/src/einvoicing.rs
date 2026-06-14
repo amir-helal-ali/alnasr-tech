@@ -12,6 +12,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::middleware::Claims;
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ pub struct EtaSubmissionRecord {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, validator::Validate)]
 pub struct SubmitInvoiceRequest {
     pub invoice_id: Uuid,
 }
@@ -108,14 +109,30 @@ pub struct SubmitInvoiceRequest {
 
 async fn get_eta_token(
     State(pool): State<PgPool>,
-    _claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
 ) -> Result<Json<EtaTokenResponse>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
+
+    // Try to get cached token first
+    let cached = sqlx::query_scalar::<_, String>(
+        "SELECT access_token FROM eta_tokens WHERE tenant_id = $1 AND expires_at > NOW()"
+    )
+    .bind(tenant_id)
+    .fetch_optional(&pool)
+    .await?;
+
+    if let Some(token) = cached {
+        return Ok(Json(EtaTokenResponse {
+            access_token: token,
+            token_type: "Bearer".to_string(),
+            expires_in: 3600,
+        }));
+    }
+
     let client_id = std::env::var("ETA_CLIENT_ID").map_err(|_| AppError::Internal("ETA_CLIENT_ID not set".into()))?;
     let client_secret = std::env::var("ETA_CLIENT_SECRET").map_err(|_| AppError::Internal("ETA_CLIENT_SECRET not set".into()))?;
     let token_url = std::env::var("ETA_TOKEN_URL").map_err(|_| AppError::Internal("ETA_TOKEN_URL not set".into()))?;
 
-    // In production, make HTTP request to ETA token endpoint
-    // For now, return a placeholder
     let client = reqwest_client();
     let response = client
         .post(&token_url)
@@ -127,6 +144,13 @@ async fn get_eta_token(
         .send()
         .await
         .map_err(|e| AppError::Internal(format!("ETA token request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        tracing::error!(status = %status, body = %body, "ETA token request failed");
+        return Err(AppError::Internal(format!("ETA token request failed with status {status}")));
+    }
 
     let token_response: EtaTokenResponse = response
         .json()
@@ -140,7 +164,7 @@ async fn get_eta_token(
          ON CONFLICT (tenant_id) DO UPDATE SET access_token = $3, expires_at = NOW() + INTERVAL '3600 seconds'"
     )
     .bind(Uuid::new_v4())
-    .bind(Uuid::nil()) // placeholder tenant_id
+    .bind(tenant_id)
     .bind(&token_response.access_token)
     .execute(&pool)
     .await
@@ -151,11 +175,15 @@ async fn get_eta_token(
 
 async fn submit_invoice(
     State(pool): State<PgPool>,
-    claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Json(req): Json<SubmitInvoiceRequest>,
 ) -> Result<Json<EtaSubmissionRecord>, AppError> {
-    let tenant_id: Uuid = claims.tenant_id.parse().map_err(|_| AppError::BadRequest("Invalid tenant".into()))?;
+    let tenant_id = claims.tenant_uuid()?;
+    let user_id = claims.user_id()?;
     let now = chrono::Utc::now();
+
+    let mut tx = pool.begin().await?;
+    crate::middleware::set_rls_context(&mut tx, tenant_id, user_id).await?;
 
     // Fetch invoice data
     let invoice = sqlx::query_as::<_, (Uuid, String, Uuid, String, rust_decimal::Decimal, rust_decimal::Decimal, rust_decimal::Decimal)>(
@@ -163,21 +191,21 @@ async fn submit_invoice(
     )
     .bind(req.invoice_id)
     .bind(tenant_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
 
     let (_, _invoice_number, _customer_id, status, _subtotal, _tax_total, _total) = &invoice;
 
-    if status != "issued" && status != "draft" {
-        return Err(AppError::BadRequest("Invoice must be in issued status to submit to ETA".into()));
+    if status != "issued" {
+        return Err(AppError::BadRequest("Invoice must be in 'issued' status to submit to ETA. Use the invoice status endpoint to change status first.".into()));
     }
 
     // Update invoice status to 'submitted'
     sqlx::query("UPDATE invoices SET status = 'submitted', updated_at = $1 WHERE id = $2")
         .bind(now)
         .bind(req.invoice_id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
 
     // Create submission record
@@ -195,7 +223,7 @@ async fn submit_invoice(
     .bind("pending")
     .bind(now)
     .bind(now)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
 
     // In production: build EtaDocument, sign with RSA-SHA256, submit to ETA API
@@ -208,14 +236,32 @@ async fn submit_invoice(
     .bind(&eta_uuid)
     .bind(serde_json::json!({"submission_id": submission_id, "eta_uuid": eta_uuid}))
     .bind(record_id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
 
-    // Update invoice status
+    // Update invoice status to 'accepted'
     sqlx::query("UPDATE invoices SET status = 'accepted', updated_at = NOW() WHERE id = $1")
         .bind(req.invoice_id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
+
+    // Audit
+    sqlx::query(
+        "INSERT INTO audit_logs (id, tenant_id, user_id, action, entity_type, entity_id, details, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id)
+    .bind(user_id)
+    .bind("submit_einvoice")
+    .bind("invoice")
+    .bind(req.invoice_id)
+    .bind(serde_json::json!({"submission_id": submission_id, "eta_uuid": eta_uuid}).to_string())
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
 
     let record = sqlx::query_as::<_, EtaSubmissionRecord>(
         "SELECT id, tenant_id, invoice_id, submission_id, status, eta_uuid, response_data, error_message, submitted_at, created_at \
@@ -230,14 +276,17 @@ async fn submit_invoice(
 
 async fn submission_status(
     State(pool): State<PgPool>,
-    _claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<EtaSubmissionRecord>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
+
     let record = sqlx::query_as::<_, EtaSubmissionRecord>(
         "SELECT id, tenant_id, invoice_id, submission_id, status, eta_uuid, response_data, error_message, submitted_at, created_at \
-         FROM eta_submissions WHERE id = $1"
+         FROM eta_submissions WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)
+    .bind(tenant_id)
     .fetch_optional(&pool)
     .await?
     .ok_or(AppError::NotFound)?;

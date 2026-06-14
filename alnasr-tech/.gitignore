@@ -1,9 +1,12 @@
-# Build
-target/
-debug/
-**/*.pdb
-**/*.exp
-**/*.lib
+# Al-Nasr Tech ERP + E-Invoicing System
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# Environment files (NEVER commit .env)
+.env
+.env.production
+.env.local
 
 # IDE
 .idea/
@@ -11,11 +14,6 @@ debug/
 *.swp
 *.swo
 *~
-
-# Environment
-.env
-.env.*
-!.env.example
 
 # OS
 .DS_Store

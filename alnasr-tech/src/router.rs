@@ -1,4 +1,4 @@
-use axum::{Router, extract::State, routing::get};
+use axum::{Router, extract::State, routing::get, middleware};
 use prometheus::{
     Encoder, TextEncoder, Registry, Opts, Counter, Histogram, Gauge,
     core::Collector,
@@ -13,6 +13,7 @@ use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::compression::CompressionLayer;
+use http::Method;
 
 use crate::auth;
 use crate::customers;
@@ -23,6 +24,7 @@ use crate::tenants;
 use crate::audit;
 use crate::analytics;
 use crate::einvoicing;
+use crate::middleware::auth_middleware;
 
 // ── Custom Prometheus collector ─────────────────────────────────────────
 
@@ -160,12 +162,14 @@ pub fn global_metrics() -> &'static AppMetrics {
 /// Build the complete Axum router with all modules and middleware.
 ///
 /// The router is constructed with `Router<PgPool>` state — `with_state`
-/// should be called by the caller (main.rs) right before serving:
+/// should be called by the caller (main.rs) right before serving.
 ///
-/// ```rust,ignore
-/// let app = create_router(pool).with_state(pool);
-/// axum::serve(listener, app).await?;
-/// ```
+/// ## Route Protection
+///
+/// - **Public routes** (no auth): `/health`, `/metrics`, `/api/auth/login`,
+///   `/api/auth/register`, `/api/auth/refresh`
+/// - **Protected routes** (auth required): All `/api/*` routes except auth public ones
+/// - **Admin routes** (auth + admin role): `/api/users/*`, `/api/tenants/*`
 pub fn create_router(pool: PgPool) -> Router<PgPool> {
     // Ensure metrics are initialized on first router creation
     let _ = &*METRICS;
@@ -180,35 +184,99 @@ pub fn create_router(pool: PgPool) -> Router<PgPool> {
         .register(Box::new(pool_collector))
         .expect("cannot register PoolStatsCollector");
 
-    // ── CORS (permissive – tighten for production) ─────────────────────
+    // ── CORS configuration ─────────────────────────────────────────────
+    // In production, set specific allowed origins via ALLOWED_ORIGINS env var.
+    // For now, permissive CORS is used but can be tightened.
+    let cors = build_cors_layer();
 
-    // ── Assemble routes with middleware ───────────────────────────────
-    Router::new()
-        // Health check
+    // ── Public routes (no authentication required) ────────────────────
+    let public_routes = Router::new()
         .route("/health", get(health_handler))
-        // Prometheus metrics
         .route("/metrics", get(metrics_handler))
-        // Domain modules
-        .merge(auth::router())
+        .merge(auth::public_router());
+
+    // ── Protected routes (authentication required) ────────────────────
+    let protected_routes = Router::new()
+        .merge(auth::protected_router())
         .merge(customers::router())
         .merge(invoices::router())
         .merge(payments::router())
-        .merge(users::router())
-        .merge(tenants::router())
-        .merge(audit::router())
         .merge(analytics::router())
         .merge(einvoicing::router())
+        .merge(audit::router())
+        .layer(middleware::from_fn(auth_middleware));
+
+    // ── Admin-only routes (authentication + admin role required) ──────
+    let admin_routes = Router::new()
+        .merge(users::router())
+        .merge(tenants::router())
+        .layer(middleware::from_fn(crate::middleware::admin_only_middleware))
+        // admin_only must run AFTER auth middleware, so nest inside
+        ;
+
+    // ── Combine all route groups ──────────────────────────────────────
+    Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
+        .merge(admin_routes)
         // Apply middleware layers individually (avoids body type compatibility issues)
         .layer(CompressionLayer::new())
-        .layer(CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any))
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024))
         .layer(TimeoutLayer::new(Duration::from_secs(30)))
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+}
+
+/// Build a CORS layer from environment configuration.
+///
+/// Set `ALLOWED_ORIGINS` env var to a comma-separated list of allowed origins.
+/// If not set, allows all origins (suitable for development only).
+fn build_cors_layer() -> CorsLayer {
+    let allowed_origins = std::env::var("ALLOWED_ORIGINS").unwrap_or_default();
+
+    if allowed_origins.is_empty() {
+        // Development: allow all origins
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any)
+    } else {
+        // Production: parse specific origins
+        let origins: Vec<_> = allowed_origins
+            .split(',')
+            .filter_map(|o| o.trim().parse().ok())
+            .collect();
+
+        if origins.is_empty() {
+            tracing::warn!("ALLOWED_ORIGINS set but no valid origins parsed; falling back to permissive CORS");
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any)
+        } else {
+            tracing::info!(origins = ?origins, "CORS configured with specific origins");
+            CorsLayer::new()
+                .allow_origin(origins)
+                .allow_methods([
+                    Method::GET,
+                    Method::POST,
+                    Method::PUT,
+                    Method::DELETE,
+                    Method::PATCH,
+                    Method::OPTIONS,
+                ])
+                .allow_headers([
+                    http::header::AUTHORIZATION,
+                    http::header::CONTENT_TYPE,
+                    http::header::ACCEPT,
+                    http::header::HeaderName::from_static("x-request-id"),
+                ])
+                .allow_credentials(true)
+                .max_age(Duration::from_secs(3600))
+        }
+    }
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────
@@ -220,9 +288,15 @@ async fn health_handler(State(pool): State<PgPool>) -> axum::Json<serde_json::Va
         .await
         .is_ok();
 
+    let pool_size = pool.size();
+    let pool_idle = pool.num_idle();
+
     axum::Json(serde_json::json!({
         "status": if db_ok { "healthy" } else { "degraded" },
         "database": db_ok,
+        "pool_size": pool_size,
+        "pool_idle": pool_idle,
+        "version": env!("CARGO_PKG_VERSION"),
     }))
 }
 

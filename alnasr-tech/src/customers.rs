@@ -8,15 +8,17 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::middleware::Claims;
 
 // ── Types ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, validator::Validate)]
 pub struct CreateCustomerRequest {
-    #[validate(length(min = 2))]
+    #[validate(length(min = 2, message = "Name must be at least 2 characters"))]
     pub name: String,
     #[validate(email)]
     pub email: String,
+    #[validate(length(max = 50, message = "Phone must be at most 50 characters"))]
     pub phone: Option<String>,
     pub address: Option<String>,
     pub city: Option<String>,
@@ -27,7 +29,9 @@ pub struct CreateCustomerRequest {
 
 #[derive(Debug, Deserialize, validator::Validate)]
 pub struct UpdateCustomerRequest {
+    #[validate(length(min = 2, message = "Name must be at least 2 characters"))]
     pub name: Option<String>,
+    #[validate(email)]
     pub email: Option<String>,
     pub phone: Option<String>,
     pub address: Option<String>,
@@ -69,13 +73,19 @@ pub struct CustomerListResponse {
     pub per_page: i64,
 }
 
+/// Validate request and return early if validation fails.
+fn validate_request<T: validator::Validate>(req: &T) -> Result<(), AppError> {
+    req.validate().map_err(AppError::from)
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────
 
 async fn list_customers(
     State(pool): State<PgPool>,
-    _claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Query(params): Query<ListCustomersQuery>,
 ) -> Result<Json<CustomerListResponse>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(20).min(100);
     let offset = (page - 1) * per_page;
@@ -84,9 +94,10 @@ async fn list_customers(
         let pattern = format!("%{search}%");
         let customers = sqlx::query_as::<_, CustomerResponse>(
             "SELECT id, tenant_id, name, email, phone, address, city, country, tax_id, notes, is_active, created_at, updated_at \
-             FROM customers WHERE is_active = true AND (name ILIKE $1 OR email ILIKE $1 OR tax_id ILIKE $1) \
-             ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+             FROM customers WHERE is_active = true AND tenant_id = $1 AND (name ILIKE $2 OR email ILIKE $2 OR tax_id ILIKE $2) \
+             ORDER BY created_at DESC LIMIT $3 OFFSET $4"
         )
+        .bind(tenant_id)
         .bind(&pattern)
         .bind(per_page)
         .bind(offset)
@@ -94,8 +105,9 @@ async fn list_customers(
         .await?;
 
         let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM customers WHERE is_active = true AND (name ILIKE $1 OR email ILIKE $1 OR tax_id ILIKE $1)"
+            "SELECT COUNT(*) FROM customers WHERE is_active = true AND tenant_id = $1 AND (name ILIKE $2 OR email ILIKE $2 OR tax_id ILIKE $2)"
         )
+        .bind(tenant_id)
         .bind(&pattern)
         .fetch_one(&pool)
         .await?;
@@ -104,16 +116,18 @@ async fn list_customers(
     } else {
         let customers = sqlx::query_as::<_, CustomerResponse>(
             "SELECT id, tenant_id, name, email, phone, address, city, country, tax_id, notes, is_active, created_at, updated_at \
-             FROM customers WHERE is_active = true ORDER BY created_at DESC LIMIT $1 OFFSET $2"
+             FROM customers WHERE is_active = true AND tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
         )
+        .bind(tenant_id)
         .bind(per_page)
         .bind(offset)
         .fetch_all(&pool)
         .await?;
 
         let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM customers WHERE is_active = true"
+            "SELECT COUNT(*) FROM customers WHERE is_active = true AND tenant_id = $1"
         )
+        .bind(tenant_id)
         .fetch_one(&pool)
         .await?;
 
@@ -130,12 +144,33 @@ async fn list_customers(
 
 async fn create_customer(
     State(pool): State<PgPool>,
-    claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Json(req): Json<CreateCustomerRequest>,
 ) -> Result<Json<CustomerResponse>, AppError> {
-    let tenant_id: Uuid = claims.tenant_id.parse().map_err(|_| AppError::BadRequest("Invalid tenant".into()))?;
+    validate_request(&req)?;
+
+    let tenant_id = claims.tenant_uuid()?;
+    let user_id = claims.user_id()?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
+
+    let mut tx = pool.begin().await?;
+
+    // Set RLS context
+    crate::middleware::set_rls_context(&mut tx, tenant_id, user_id).await?;
+
+    // Check for duplicate email within tenant
+    let duplicate = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM customers WHERE tenant_id = $1 AND email = $2 AND is_active = true"
+    )
+    .bind(tenant_id)
+    .bind(&req.email)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if duplicate > 0 {
+        return Err(AppError::BadRequest("A customer with this email already exists in your organization".into()));
+    }
 
     sqlx::query(
         "INSERT INTO customers (id, tenant_id, name, email, phone, address, city, country, tax_id, notes, is_active, created_at, updated_at) \
@@ -154,7 +189,7 @@ async fn create_customer(
     .bind(true)
     .bind(now)
     .bind(now)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
 
     // Audit log
@@ -164,14 +199,16 @@ async fn create_customer(
     )
     .bind(Uuid::new_v4())
     .bind(tenant_id)
-    .bind(claims.sub.parse::<Uuid>().map_err(|_| AppError::BadRequest("Invalid user".into()))?)
+    .bind(user_id)
     .bind("create_customer")
     .bind("customer")
     .bind(id)
     .bind(serde_json::json!({"name": req.name, "email": req.email}).to_string())
     .bind(now)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     let customer = sqlx::query_as::<_, CustomerResponse>(
         "SELECT id, tenant_id, name, email, phone, address, city, country, tax_id, notes, is_active, created_at, updated_at \
@@ -186,14 +223,17 @@ async fn create_customer(
 
 async fn get_customer(
     State(pool): State<PgPool>,
-    _claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<CustomerResponse>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
+
     let customer = sqlx::query_as::<_, CustomerResponse>(
         "SELECT id, tenant_id, name, email, phone, address, city, country, tax_id, notes, is_active, created_at, updated_at \
-         FROM customers WHERE id = $1 AND is_active = true"
+         FROM customers WHERE id = $1 AND tenant_id = $2 AND is_active = true"
     )
     .bind(id)
+    .bind(tenant_id)
     .fetch_optional(&pool)
     .await?
     .ok_or(AppError::NotFound)?;
@@ -203,13 +243,49 @@ async fn get_customer(
 
 async fn update_customer(
     State(pool): State<PgPool>,
-    claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateCustomerRequest>,
 ) -> Result<Json<CustomerResponse>, AppError> {
+    validate_request(&req)?;
+
+    let tenant_id = claims.tenant_uuid()?;
+    let user_id = claims.user_id()?;
     let now = chrono::Utc::now();
 
-    // Simplified: update all fields at once using COALESCE for partial updates
+    let mut tx = pool.begin().await?;
+
+    crate::middleware::set_rls_context(&mut tx, tenant_id, user_id).await?;
+
+    // Verify ownership
+    let exists = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM customers WHERE id = $1 AND tenant_id = $2"
+    )
+    .bind(id)
+    .bind(tenant_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if exists == 0 {
+        return Err(AppError::NotFound);
+    }
+
+    // If email is being changed, check for duplicates
+    if let Some(ref email) = req.email {
+        let duplicate = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM customers WHERE tenant_id = $1 AND email = $2 AND id != $3 AND is_active = true"
+        )
+        .bind(tenant_id)
+        .bind(email)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if duplicate > 0 {
+            return Err(AppError::BadRequest("A customer with this email already exists".into()));
+        }
+    }
+
     sqlx::query(
         "UPDATE customers SET name = COALESCE($2, name), email = COALESCE($3, email), \
          phone = COALESCE($4, phone), address = COALESCE($5, address), city = COALESCE($6, city), \
@@ -226,12 +302,10 @@ async fn update_customer(
     .bind(&req.tax_id)
     .bind(&req.notes)
     .bind(now)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
 
     // Audit
-    let tenant_id: Uuid = claims.tenant_id.parse().unwrap_or_else(|_| Uuid::nil());
-    let user_id: Uuid = claims.sub.parse().unwrap_or_else(|_| Uuid::nil());
     sqlx::query(
         "INSERT INTO audit_logs (id, tenant_id, user_id, action, entity_type, entity_id, details, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
@@ -244,8 +318,10 @@ async fn update_customer(
     .bind(id)
     .bind(serde_json::json!({"updated_fields": "multiple"}).to_string())
     .bind(now)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     let customer = sqlx::query_as::<_, CustomerResponse>(
         "SELECT id, tenant_id, name, email, phone, address, city, country, tax_id, notes, is_active, created_at, updated_at \
@@ -260,18 +336,51 @@ async fn update_customer(
 
 async fn delete_customer(
     State(pool): State<PgPool>,
-    claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
+    let user_id = claims.user_id()?;
+    let now = chrono::Utc::now();
+
+    let mut tx = pool.begin().await?;
+
+    crate::middleware::set_rls_context(&mut tx, tenant_id, user_id).await?;
+
+    // Verify ownership before soft delete
+    let exists = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM customers WHERE id = $1 AND tenant_id = $2 AND is_active = true"
+    )
+    .bind(id)
+    .bind(tenant_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if exists == 0 {
+        return Err(AppError::NotFound);
+    }
+
+    // Check if customer has active invoices
+    let invoice_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM invoices WHERE customer_id = $1 AND status NOT IN ('paid', 'cancelled')"
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if invoice_count > 0 {
+        return Err(AppError::BadRequest(
+            "Cannot delete customer with active invoices. Please settle or cancel invoices first.".into()
+        ));
+    }
+
     // Soft delete
     sqlx::query("UPDATE customers SET is_active = false, updated_at = NOW() WHERE id = $1")
         .bind(id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
 
     // Audit
-    let tenant_id: Uuid = claims.tenant_id.parse().unwrap_or_else(|_| Uuid::nil());
-    let user_id: Uuid = claims.sub.parse().unwrap_or_else(|_| Uuid::nil());
     sqlx::query(
         "INSERT INTO audit_logs (id, tenant_id, user_id, action, entity_type, entity_id, details, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
@@ -283,9 +392,11 @@ async fn delete_customer(
     .bind("customer")
     .bind(id)
     .bind("{\"action\": \"soft_delete\"}")
-    .bind(chrono::Utc::now())
-    .execute(&pool)
+    .bind(now)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     Ok(Json(serde_json::json!({ "message": "Customer deleted" })))
 }

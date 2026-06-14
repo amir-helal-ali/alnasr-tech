@@ -25,6 +25,9 @@ services:
         reservations:
           memory: 256M
     shm_size: '128mb'
+    # Production: do not expose port externally
+    # networks:
+    #   - internal
 
   app:
     build:
@@ -48,6 +51,7 @@ services:
       SMTP_PASS: ${SMTP_PASS:-change_me}
       SMTP_FROM: ${SMTP_FROM:-Al-Nasr Tech <noreply@alnasr.tech>}
       RUST_LOG: ${RUST_LOG:-info,sqlx=warn,tower_http=warn}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
     depends_on:
       postgres:
         condition: service_healthy

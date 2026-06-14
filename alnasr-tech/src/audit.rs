@@ -8,6 +8,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::middleware::Claims;
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -47,22 +48,25 @@ pub struct AuditLogListResponse {
 
 async fn list_audit_logs(
     State(pool): State<PgPool>,
-    _claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Query(params): Query<ListAuditLogsQuery>,
 ) -> Result<Json<AuditLogListResponse>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(50).min(200);
     let offset = (page - 1) * per_page;
 
     let logs = sqlx::query_as::<_, AuditLogResponse>(
         "SELECT id, tenant_id, user_id, action, entity_type, entity_id, details, ip_address, created_at \
-         FROM audit_logs WHERE ($1::uuid IS NULL OR user_id = $1) \
-         AND ($2::text IS NULL OR entity_type = $2) \
-         AND ($3::text IS NULL OR action = $3) \
-         AND ($4::timestamptz IS NULL OR created_at >= $4) \
-         AND ($5::timestamptz IS NULL OR created_at <= $5) \
-         ORDER BY created_at DESC LIMIT $6 OFFSET $7"
+         FROM audit_logs WHERE tenant_id = $1 \
+         AND ($2::uuid IS NULL OR user_id = $2) \
+         AND ($3::text IS NULL OR entity_type = $3) \
+         AND ($4::text IS NULL OR action = $4) \
+         AND ($5::timestamptz IS NULL OR created_at >= $5) \
+         AND ($6::timestamptz IS NULL OR created_at <= $6) \
+         ORDER BY created_at DESC LIMIT $7 OFFSET $8"
     )
+    .bind(tenant_id)
     .bind(params.user_id)
     .bind(&params.entity_type)
     .bind(&params.action)
@@ -74,12 +78,14 @@ async fn list_audit_logs(
     .await?;
 
     let total = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM audit_logs WHERE ($1::uuid IS NULL OR user_id = $1) \
-         AND ($2::text IS NULL OR entity_type = $2) \
-         AND ($3::text IS NULL OR action = $3) \
-         AND ($4::timestamptz IS NULL OR created_at >= $4) \
-         AND ($5::timestamptz IS NULL OR created_at <= $5)"
+        "SELECT COUNT(*) FROM audit_logs WHERE tenant_id = $1 \
+         AND ($2::uuid IS NULL OR user_id = $2) \
+         AND ($3::text IS NULL OR entity_type = $3) \
+         AND ($4::text IS NULL OR action = $4) \
+         AND ($5::timestamptz IS NULL OR created_at >= $5) \
+         AND ($6::timestamptz IS NULL OR created_at <= $6)"
     )
+    .bind(tenant_id)
     .bind(params.user_id)
     .bind(&params.entity_type)
     .bind(&params.action)
@@ -93,14 +99,17 @@ async fn list_audit_logs(
 
 async fn get_audit_log(
     State(pool): State<PgPool>,
-    _claims: axum::Extension<crate::middleware::Claims>,
+    claims: axum::Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<AuditLogResponse>, AppError> {
+    let tenant_id = claims.tenant_uuid()?;
+
     let log = sqlx::query_as::<_, AuditLogResponse>(
         "SELECT id, tenant_id, user_id, action, entity_type, entity_id, details, ip_address, created_at \
-         FROM audit_logs WHERE id = $1"
+         FROM audit_logs WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)
+    .bind(tenant_id)
     .fetch_optional(&pool)
     .await?
     .ok_or(AppError::NotFound)?;

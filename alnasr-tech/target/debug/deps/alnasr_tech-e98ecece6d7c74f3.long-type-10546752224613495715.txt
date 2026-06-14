@@ -1,2 +1,0 @@
-fn(State<Pool<Postgres>>, Claims, axum::Json<CreateTenantRequest>) -> impl std::future::Future<Output = Result<axum::Json<TenantResponse>, AppError>> {create_tenant}
-fn(State<Pool<Postgres>>, Claims, axum::Json<CreateTenantRequest>) -> impl std::future::Future<Output = Result<axum::Json<TenantResponse>, AppError>> {create_tenant}: Handler<_, ()>

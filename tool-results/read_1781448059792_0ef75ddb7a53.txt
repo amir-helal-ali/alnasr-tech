@@ -1,0 +1,1043 @@
+     1→'use client';
+     2→
+     3→import { useState, useMemo, useCallback } from 'react';
+     4→import { useAppSettings } from '@/lib/store';
+     5→import { translations } from '@/lib/i18n';
+     6→import { AppShell } from '@/components/app-shell';
+     7→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+     8→import { Button } from '@/components/ui/button';
+     9→import { Input } from '@/components/ui/input';
+    10→import { Label } from '@/components/ui/label';
+    11→import {
+    12→  Dialog,
+    13→  DialogContent,
+    14→  DialogHeader,
+    15→  DialogTitle,
+    16→  DialogFooter,
+    17→  DialogDescription,
+    18→} from '@/components/ui/dialog';
+    19→import {
+    20→  Tabs,
+    21→  TabsList,
+    22→  TabsTrigger,
+    23→} from '@/components/ui/tabs';
+    24→import { Badge } from '@/components/ui/badge';
+    25→import {
+    26→  Table,
+    27→  TableBody,
+    28→  TableCell,
+    29→  TableHead,
+    30→  TableHeader,
+    31→  TableRow,
+    32→} from '@/components/ui/table';
+    33→import {
+    34→  Select,
+    35→  SelectContent,
+    36→  SelectItem,
+    37→  SelectTrigger,
+    38→  SelectValue,
+    39→} from '@/components/ui/select';
+    40→import { Textarea } from '@/components/ui/textarea';
+    41→import { Separator } from '@/components/ui/separator';
+    42→import { ScrollArea } from '@/components/ui/scroll-area';
+    43→import {
+    44→  Plus,
+    45→  Edit,
+    46→  Trash2,
+    47→  Eye,
+    48→  FileText,
+    49→  Calculator,
+    50→  X,
+    51→} from 'lucide-react';
+    52→import { toast } from 'sonner';
+    53→
+    54→// ─── Types ───────────────────────────────────────────────────────────────────
+    55→
+    56→type InvoiceStatus = 'draft' | 'issued' | 'submitted' | 'accepted' | 'paid' | 'cancelled';
+    57→
+    58→interface LineItem {
+    59→  id: string;
+    60→  description: string;
+    61→  quantity: number;
+    62→  unitPrice: number;
+    63→  taxRate: number;
+    64→}
+    65→
+    66→interface Invoice {
+    67→  id: string;
+    68→  invoiceNumber: string;
+    69→  customerId: string;
+    70→  customerName: string;
+    71→  status: InvoiceStatus;
+    72→  issueDate: string;
+    73→  dueDate: string;
+    74→  lineItems: LineItem[];
+    75→  notes: string;
+    76→  createdAt: string;
+    77→}
+    78→
+    79→// ─── Helpers ─────────────────────────────────────────────────────────────────
+    80→
+    81→const EGYPT_VAT = 14;
+    82→
+    83→function calcLineTaxAmount(item: LineItem): number {
+    84→  return item.quantity * item.unitPrice * (item.taxRate / 100);
+    85→}
+    86→
+    87→function calcLineTotal(item: LineItem): number {
+    88→  return item.quantity * item.unitPrice + calcLineTaxAmount(item);
+    89→}
+    90→
+    91→function calcSubtotal(items: LineItem[]): number {
+    92→  return items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+    93→}
+    94→
+    95→function calcTaxTotal(items: LineItem[]): number {
+    96→  return items.reduce((sum, i) => sum + calcLineTaxAmount(i), 0);
+    97→}
+    98→
+    99→function calcGrandTotal(items: LineItem[]): number {
+   100→  return calcSubtotal(items) + calcTaxTotal(items);
+   101→}
+   102→
+   103→function formatCurrency(amount: number): string {
+   104→  return amount.toLocaleString('ar-EG', {
+   105→    minimumFractionDigits: 2,
+   106→    maximumFractionDigits: 2,
+   107→  }) + ' ج.م';
+   108→}
+   109→
+   110→function formatDate(dateStr: string): string {
+   111→  return new Date(dateStr).toLocaleDateString('ar-EG', {
+   112→    year: 'numeric',
+   113→    month: 'short',
+   114→    day: 'numeric',
+   115→  });
+   116→}
+   117→
+   118→function uid(): string {
+   119→  return Math.random().toString(36).substring(2, 10);
+   120→}
+   121→
+   122→// ─── Status Config ───────────────────────────────────────────────────────────
+   123→
+   124→interface StatusConfig {
+   125→  labelAr: string;
+   126→  labelEn: string;
+   127→  className: string;
+   128→}
+   129→
+   130→const statusConfig: Record<InvoiceStatus, StatusConfig> = {
+   131→  draft: {
+   132→    labelAr: 'مسودة',
+   133→    labelEn: 'Draft',
+   134→    className: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+   135→  },
+   136→  issued: {
+   137→    labelAr: 'صادرة',
+   138→    labelEn: 'Issued',
+   139→    className: 'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900 dark:text-sky-300 dark:border-sky-800',
+   140→  },
+   141→  submitted: {
+   142→    labelAr: 'مُقدمة',
+   143→    labelEn: 'Submitted',
+   144→    className: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900 dark:text-amber-300 dark:border-amber-800',
+   145→  },
+   146→  accepted: {
+   147→    labelAr: 'مقبولة',
+   148→    labelEn: 'Accepted',
+   149→    className: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900 dark:text-emerald-300 dark:border-emerald-800',
+   150→  },
+   151→  paid: {
+   152→    labelAr: 'مدفوعة',
+   153→    labelEn: 'Paid',
+   154→    className: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900 dark:text-green-300 dark:border-green-800',
+   155→  },
+   156→  cancelled: {
+   157→    labelAr: 'ملغاة',
+   158→    labelEn: 'Cancelled',
+   159→    className: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900 dark:text-red-300 dark:border-red-800',
+   160→  },
+   161→};
+   162→
+   163→// ─── Mock Customers ──────────────────────────────────────────────────────────
+   164→
+   165→const mockCustomers = [
+   166→  { id: 'c1', name: 'شركة النيل للتجارة' },
+   167→  { id: 'c2', name: 'مؤسسة الأهرام' },
+   168→  { id: 'c3', name: 'شركة السلام' },
+   169→  { id: 'c4', name: 'مصنع الحرية' },
+   170→  { id: 'c5', name: 'شركة الوادي' },
+   171→  { id: 'c6', name: 'مجموعة الفتح' },
+   172→];
+   173→
+   174→// ─── Mock Invoices ───────────────────────────────────────────────────────────
+   175→
+   176→const initialInvoices: Invoice[] = [
+   177→  {
+   178→    id: 'inv1',
+   179→    invoiceNumber: 'INV-2026-0001',
+   180→    customerId: 'c1',
+   181→    customerName: 'شركة النيل للتجارة',
+   182→    status: 'paid',
+   183→    issueDate: '2026-01-15',
+   184→    dueDate: '2026-02-15',
+   185→    lineItems: [
+   186→      { id: 'l1', description: 'أجهزة حاسب آلي', quantity: 5, unitPrice: 15000, taxRate: 14 },
+   187→      { id: 'l2', description: 'طابعات ليزر', quantity: 3, unitPrice: 4500, taxRate: 14 },
+   188→    ],
+   189→    notes: 'تم الدفع عبر تحويل بنكي',
+   190→    createdAt: '2026-01-15T10:00:00Z',
+   191→  },
+   192→  {
+   193→    id: 'inv2',
+   194→    invoiceNumber: 'INV-2026-0002',
+   195→    customerId: 'c2',
+   196→    customerName: 'مؤسسة الأهرام',
+   197→    status: 'issued',
+   198→    issueDate: '2026-02-01',
+   199→    dueDate: '2026-03-01',
+   200→    lineItems: [
+   201→      { id: 'l3', description: 'خدمات استشارية', quantity: 1, unitPrice: 25000, taxRate: 14 },
+   202→    ],
+   203→    notes: '',
+   204→    createdAt: '2026-02-01T09:30:00Z',
+   205→  },
+   206→  {
+   207→    id: 'inv3',
+   208→    invoiceNumber: 'INV-2026-0003',
+   209→    customerId: 'c3',
+   210→    customerName: 'شركة السلام',
+   211→    status: 'draft',
+   212→    issueDate: '2026-02-20',
+   213→    dueDate: '2026-03-20',
+   214→    lineItems: [
+   215→      { id: 'l4', description: 'شاشات عرض', quantity: 10, unitPrice: 3200, taxRate: 14 },
+   216→      { id: 'l5', description: 'كابلات توصيل', quantity: 20, unitPrice: 150, taxRate: 14 },
+   217→      { id: 'l6', description: 'حوامل شاشات', quantity: 10, unitPrice: 800, taxRate: 14 },
+   218→    ],
+   219→    notes: 'بانتظار تأكيد العميل',
+   220→    createdAt: '2026-02-20T14:00:00Z',
+   221→  },
+   222→  {
+   223→    id: 'inv4',
+   224→    invoiceNumber: 'INV-2026-0004',
+   225→    customerId: 'c4',
+   226→    customerName: 'مصنع الحرية',
+   227→    status: 'submitted',
+   228→    issueDate: '2026-03-05',
+   229→    dueDate: '2026-04-05',
+   230→    lineItems: [
+   231→      { id: 'l7', description: 'صيانة دورية', quantity: 1, unitPrice: 8500, taxRate: 14 },
+   232→      { id: 'l8', description: 'قطع غيار', quantity: 4, unitPrice: 1200, taxRate: 14 },
+   233→    ],
+   234→    notes: 'تم التقديم لهيئة الضرائب',
+   235→    createdAt: '2026-03-05T11:00:00Z',
+   236→  },
+   237→  {
+   238→    id: 'inv5',
+   239→    invoiceNumber: 'INV-2026-0005',
+   240→    customerId: 'c5',
+   241→    customerName: 'شركة الوادي',
+   242→    status: 'accepted',
+   243→    issueDate: '2026-03-10',
+   244→    dueDate: '2026-04-10',
+   245→    lineItems: [
+   246→      { id: 'l9', description: 'برمجة تطبيق مخصص', quantity: 1, unitPrice: 75000, taxRate: 14 },
+   247→    ],
+   248→    notes: 'مقبولة من هيئة الضرائب',
+   249→    createdAt: '2026-03-10T16:00:00Z',
+   250→  },
+   251→  {
+   252→    id: 'inv6',
+   253→    invoiceNumber: 'INV-2026-0006',
+   254→    customerId: 'c6',
+   255→    customerName: 'مجموعة الفتح',
+   256→    status: 'cancelled',
+   257→    issueDate: '2026-01-20',
+   258→    dueDate: '2026-02-20',
+   259→    lineItems: [
+   260→      { id: 'l10', description: 'أثاث مكتبي', quantity: 8, unitPrice: 3500, taxRate: 14 },
+   261→    ],
+   262→    notes: 'تم الإلغاء بناءً على طلب العميل',
+   263→    createdAt: '2026-01-20T08:00:00Z',
+   264→  },
+   265→  {
+   266→    id: 'inv7',
+   267→    invoiceNumber: 'INV-2026-0007',
+   268→    customerId: 'c1',
+   269→    customerName: 'شركة النيل للتجارة',
+   270→    status: 'paid',
+   271→    issueDate: '2026-03-25',
+   272→    dueDate: '2026-04-25',
+   273→    lineItems: [
+   274→      { id: 'l11', description: 'سيرفرات', quantity: 2, unitPrice: 45000, taxRate: 14 },
+   275→      { id: 'l12', description: 'تركيب وتجهيز', quantity: 1, unitPrice: 12000, taxRate: 14 },
+   276→    ],
+   277→    notes: '',
+   278→    createdAt: '2026-03-25T13:00:00Z',
+   279→  },
+   280→];
+   281→
+   282→// ─── Component ───────────────────────────────────────────────────────────────
+   283→
+   284→export default function InvoicesPage() {
+   285→  const { language } = useAppSettings();
+   286→  const t = translations[language];
+   287→  const isAr = language === 'ar';
+   288→
+   289→  // State
+   290→  const [invoices, setInvoices] = useState<Invoice[]>(initialInvoices);
+   291→  const [activeTab, setActiveTab] = useState<string>('all');
+   292→  const [formOpen, setFormOpen] = useState(false);
+   293→  const [detailOpen, setDetailOpen] = useState(false);
+   294→  const [deleteOpen, setDeleteOpen] = useState(false);
+   295→  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+   296→  const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
+   297→  const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
+   298→
+   299→  // Form state
+   300→  const [formCustomerId, setFormCustomerId] = useState('');
+   301→  const [formIssueDate, setFormIssueDate] = useState('');
+   302→  const [formDueDate, setFormDueDate] = useState('');
+   303→  const [formNotes, setFormNotes] = useState('');
+   304→  const [formLineItems, setFormLineItems] = useState<LineItem[]>([]);
+   305→
+   306→  // ─── Filtered invoices ──────────────────────────────────────────────────
+   307→
+   308→  const filteredInvoices = useMemo(() => {
+   309→    if (activeTab === 'all') return invoices;
+   310→    return invoices.filter((inv) => inv.status === activeTab);
+   311→  }, [invoices, activeTab]);
+   312→
+   313→  // ─── Tab counts ─────────────────────────────────────────────────────────
+   314→
+   315→  const tabCounts = useMemo(() => {
+   316→    const counts: Record<string, number> = { all: invoices.length };
+   317→    for (const inv of invoices) {
+   318→      counts[inv.status] = (counts[inv.status] || 0) + 1;
+   319→    }
+   320→    return counts;
+   321→  }, [invoices]);
+   322→
+   323→  // ─── Reset form ─────────────────────────────────────────────────────────
+   324→
+   325→  const resetForm = useCallback(() => {
+   326→    setFormCustomerId('');
+   327→    setFormIssueDate(new Date().toISOString().split('T')[0]);
+   328→    setFormDueDate('');
+   329→    setFormNotes('');
+   330→    setFormLineItems([
+   331→      { id: uid(), description: '', quantity: 1, unitPrice: 0, taxRate: EGYPT_VAT },
+   332→    ]);
+   333→    setEditingInvoice(null);
+   334→  }, []);
+   335→
+   336→  // ─── Open create ────────────────────────────────────────────────────────
+   337→
+   338→  const openCreate = useCallback(() => {
+   339→    resetForm();
+   340→    setFormOpen(true);
+   341→  }, [resetForm]);
+   342→
+   343→  // ─── Open edit ──────────────────────────────────────────────────────────
+   344→
+   345→  const openEdit = useCallback((invoice: Invoice) => {
+   346→    setEditingInvoice(invoice);
+   347→    setFormCustomerId(invoice.customerId);
+   348→    setFormIssueDate(invoice.issueDate);
+   349→    setFormDueDate(invoice.dueDate);
+   350→    setFormNotes(invoice.notes);
+   351→    setFormLineItems(
+   352→      invoice.lineItems.map((li) => ({ ...li, id: uid() }))
+   353→    );
+   354→    setFormOpen(true);
+   355→  }, []);
+   356→
+   357→  // ─── Open detail ────────────────────────────────────────────────────────
+   358→
+   359→  const openDetail = useCallback((invoice: Invoice) => {
+   360→    setViewingInvoice(invoice);
+   361→    setDetailOpen(true);
+   362→  }, []);
+   363→
+   364→  // ─── Open delete ────────────────────────────────────────────────────────
+   365→
+   366→  const openDelete = useCallback((invoice: Invoice) => {
+   367→    setDeletingInvoice(invoice);
+   368→    setDeleteOpen(true);
+   369→  }, []);
+   370→
+   371→  // ─── Line item helpers ──────────────────────────────────────────────────
+   372→
+   373→  const addLineItem = useCallback(() => {
+   374→    setFormLineItems((prev) => [
+   375→      ...prev,
+   376→      { id: uid(), description: '', quantity: 1, unitPrice: 0, taxRate: EGYPT_VAT },
+   377→    ]);
+   378→  }, []);
+   379→
+   380→  const removeLineItem = useCallback((id: string) => {
+   381→    setFormLineItems((prev) => {
+   382→      if (prev.length <= 1) return prev;
+   383→      return prev.filter((li) => li.id !== id);
+   384→    });
+   385→  }, []);
+   386→
+   387→  const updateLineItem = useCallback(
+   388→    (id: string, field: keyof LineItem, value: string | number) => {
+   389→      setFormLineItems((prev) =>
+   390→        prev.map((li) => (li.id === id ? { ...li, [field]: value } : li))
+   391→      );
+   392→    },
+   393→    []
+   394→  );
+   395→
+   396→  // ─── Save invoice ───────────────────────────────────────────────────────
+   397→
+   398→  const handleSave = useCallback(() => {
+   399→    // Validate
+   400→    if (!formCustomerId) {
+   401→      toast.error(isAr ? 'يرجى اختيار العميل' : 'Please select a customer');
+   402→      return;
+   403→    }
+   404→    if (!formIssueDate) {
+   405→      toast.error(isAr ? 'يرجى إدخال تاريخ الإصدار' : 'Please enter issue date');
+   406→      return;
+   407→    }
+   408→    if (!formDueDate) {
+   409→      toast.error(isAr ? 'يرجى إدخال تاريخ الاستحقاق' : 'Please enter due date');
+   410→      return;
+   411→    }
+   412→    const hasEmptyDesc = formLineItems.some((li) => !li.description.trim());
+   413→    if (hasEmptyDesc) {
+   414→      toast.error(isAr ? 'يرجى إدخال وصف لجميع البنود' : 'Please enter description for all items');
+   415→      return;
+   416→    }
+   417→    const hasZeroPrice = formLineItems.some((li) => li.unitPrice <= 0);
+   418→    if (hasZeroPrice) {
+   419→      toast.error(isAr ? 'يرجى إدخال سعر وحدة صحيح' : 'Please enter valid unit price');
+   420→      return;
+   421→    }
+   422→
+   423→    const customer = mockCustomers.find((c) => c.id === formCustomerId);
+   424→    const customerName = customer?.name || '';
+   425→
+   426→    if (editingInvoice) {
+   427→      // Update
+   428→      setInvoices((prev) =>
+   429→        prev.map((inv) =>
+   430→          inv.id === editingInvoice.id
+   431→            ? {
+   432→                ...inv,
+   433→                customerId: formCustomerId,
+   434→                customerName,
+   435→                issueDate: formIssueDate,
+   436→                dueDate: formDueDate,
+   437→                notes: formNotes,
+   438→                lineItems: formLineItems.map((li) => ({ ...li })),
+   439→              }
+   440→            : inv
+   441→        )
+   442→      );
+   443→      toast.success(isAr ? 'تم تحديث الفاتورة بنجاح' : 'Invoice updated successfully');
+   444→    } else {
+   445→      // Create
+   446→      const nextNum = invoices.length + 1;
+   447→      const newInvoice: Invoice = {
+   448→        id: uid(),
+   449→        invoiceNumber: `INV-2026-${String(nextNum).padStart(4, '0')}`,
+   450→        customerId: formCustomerId,
+   451→        customerName,
+   452→        status: 'draft',
+   453→        issueDate: formIssueDate,
+   454→        dueDate: formDueDate,
+   455→        notes: formNotes,
+   456→        lineItems: formLineItems.map((li) => ({ ...li })),
+   457→        createdAt: new Date().toISOString(),
+   458→      };
+   459→      setInvoices((prev) => [newInvoice, ...prev]);
+   460→      toast.success(isAr ? 'تم إنشاء الفاتورة بنجاح' : 'Invoice created successfully');
+   461→    }
+   462→
+   463→    setFormOpen(false);
+   464→    resetForm();
+   465→  }, [formCustomerId, formIssueDate, formDueDate, formNotes, formLineItems, editingInvoice, invoices, isAr, resetForm]);
+   466→
+   467→  // ─── Delete invoice ─────────────────────────────────────────────────────
+   468→
+   469→  const handleDelete = useCallback(() => {
+   470→    if (!deletingInvoice) return;
+   471→    setInvoices((prev) => prev.filter((inv) => inv.id !== deletingInvoice.id));
+   472→    setDeleteOpen(false);
+   473→    setDeletingInvoice(null);
+   474→    toast.success(isAr ? 'تم حذف الفاتورة بنجاح' : 'Invoice deleted successfully');
+   475→  }, [deletingInvoice, isAr]);
+   476→
+   477→
+   478→
+   479→  // ─── Computed form totals ───────────────────────────────────────────────
+   480→
+   481→  const formSubtotal = useMemo(() => calcSubtotal(formLineItems), [formLineItems]);
+   482→  const formTaxTotal = useMemo(() => calcTaxTotal(formLineItems), [formLineItems]);
+   483→  const formGrandTotal = useMemo(() => calcGrandTotal(formLineItems), [formLineItems]);
+   484→
+   485→  // ─── Render ─────────────────────────────────────────────────────────────
+   486→
+   487→  return (
+   488→    <AppShell>
+   489→      <div className="space-y-6">
+   490→        {/* ── Header ──────────────────────────────────────────────────── */}
+   491→        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+   492→          <div className="flex items-center gap-3">
+   493→            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+   494→              <FileText className="h-5 w-5 text-primary" />
+   495→            </div>
+   496→            <div>
+   497→              <h1 className="text-2xl font-bold text-foreground">{t.invoices}</h1>
+   498→              <p className="text-sm text-muted-foreground">
+   499→                {isAr ? 'إدارة الفواتير والضرائب' : 'Invoice & Tax Management'}
+   500→              </p>
+   501→            </div>
+   502→          </div>
+   503→          <Button onClick={openCreate} className="gap-2">
+   504→            <Plus className="h-4 w-4" />
+   505→            {t.newInvoice}
+   506→          </Button>
+   507→        </div>
+   508→
+   509→        {/* ── Status Filter Tabs ──────────────────────────────────────── */}
+   510→        <Tabs value={activeTab} onValueChange={setActiveTab}>
+   511→          <TabsList className="flex-wrap h-auto gap-1 bg-muted/50 p-1">
+   512→            <TabsTrigger value="all" className="gap-1.5 text-xs sm:text-sm">
+   513→              {isAr ? 'الكل' : 'All'}
+   514→              <span className="inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-background px-1.5 text-[10px] font-medium">
+   515→                {tabCounts.all || 0}
+   516→              </span>
+   517→            </TabsTrigger>
+   518→            {(['draft', 'issued', 'submitted', 'accepted', 'paid', 'cancelled'] as InvoiceStatus[]).map(
+   519→              (status) => (
+   520→                <TabsTrigger
+   521→                  key={status}
+   522→                  value={status}
+   523→                  className="gap-1.5 text-xs sm:text-sm"
+   524→                >
+   525→                  {isAr ? statusConfig[status].labelAr : statusConfig[status].labelEn}
+   526→                  <span className="inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-background px-1.5 text-[10px] font-medium">
+   527→                    {tabCounts[status] || 0}
+   528→                  </span>
+   529→                </TabsTrigger>
+   530→              )
+   531→            )}
+   532→          </TabsList>
+   533→        </Tabs>
+   534→
+   535→        {/* ── Data Table ──────────────────────────────────────────────── */}
+   536→        <Card>
+   537→          <CardContent className="p-0">
+   538→            <ScrollArea className="w-full">
+   539→              <Table>
+   540→                <TableHeader>
+   541→                  <TableRow>
+   542→                    <TableHead className="text-center">{t.invoiceNumber}</TableHead>
+   543→                    <TableHead className="text-center">{t.customer}</TableHead>
+   544→                    <TableHead className="text-center hidden md:table-cell">{t.issueDate}</TableHead>
+   545→                    <TableHead className="text-center hidden lg:table-cell">{t.dueDate}</TableHead>
+   546→                    <TableHead className="text-center hidden sm:table-cell">{t.subtotal}</TableHead>
+   547→                    <TableHead className="text-center hidden sm:table-cell">{t.tax}</TableHead>
+   548→                    <TableHead className="text-center">{t.total}</TableHead>
+   549→                    <TableHead className="text-center">{t.status}</TableHead>
+   550→                    <TableHead className="text-center">{t.actions}</TableHead>
+   551→                  </TableRow>
+   552→                </TableHeader>
+   553→                <TableBody>
+   554→                  {filteredInvoices.length === 0 ? (
+   555→                    <TableRow>
+   556→                      <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
+   557→                        <div className="flex flex-col items-center gap-2">
+   558→                          <FileText className="h-8 w-8 text-muted-foreground/50" />
+   559→                          <p>{t.noData}</p>
+   560→                        </div>
+   561→                      </TableCell>
+   562→                    </TableRow>
+   563→                  ) : (
+   564→                    filteredInvoices.map((invoice) => {
+   565→                      const subtotal = calcSubtotal(invoice.lineItems);
+   566→                      const taxTotal = calcTaxTotal(invoice.lineItems);
+   567→                      const grandTotal = calcGrandTotal(invoice.lineItems);
+   568→                      return (
+   569→                        <TableRow key={invoice.id} className="hover:bg-muted/50 transition-colors">
+   570→                          <TableCell className="font-mono text-sm font-medium text-center">
+   571→                            {invoice.invoiceNumber}
+   572→                          </TableCell>
+   573→                          <TableCell className="text-center font-medium">
+   574→                            {invoice.customerName}
+   575→                          </TableCell>
+   576→                          <TableCell className="text-center hidden md:table-cell text-sm text-muted-foreground">
+   577→                            {formatDate(invoice.issueDate)}
+   578→                          </TableCell>
+   579→                          <TableCell className="text-center hidden lg:table-cell text-sm text-muted-foreground">
+   580→                            {formatDate(invoice.dueDate)}
+   581→                          </TableCell>
+   582→                          <TableCell className="text-center hidden sm:table-cell text-sm">
+   583→                            {formatCurrency(subtotal)}
+   584→                          </TableCell>
+   585→                          <TableCell className="text-center hidden sm:table-cell text-sm">
+   586→                            {formatCurrency(taxTotal)}
+   587→                          </TableCell>
+   588→                          <TableCell className="text-center font-semibold">
+   589→                            {formatCurrency(grandTotal)}
+   590→                          </TableCell>
+   591→                          <TableCell className="text-center">
+   592→                            <Badge variant="outline" className={statusConfig[invoice.status].className}>
+   593→                              {isAr ? statusConfig[invoice.status].labelAr : statusConfig[invoice.status].labelEn}
+   594→                            </Badge>
+   595→                          </TableCell>
+   596→                          <TableCell>
+   597→                            <div className="flex items-center justify-center gap-1">
+   598→                              <Button
+   599→                                variant="ghost"
+   600→                                size="icon"
+   601→                                className="h-8 w-8"
+   602→                                onClick={() => openDetail(invoice)}
+   603→                                title={isAr ? 'عرض' : 'View'}
+   604→                              >
+   605→                                <Eye className="h-4 w-4 text-muted-foreground" />
+   606→                              </Button>
+   607→                              <Button
+   608→                                variant="ghost"
+   609→                                size="icon"
+   610→                                className="h-8 w-8"
+   611→                                onClick={() => openEdit(invoice)}
+   612→                                title={isAr ? 'تعديل' : 'Edit'}
+   613→                              >
+   614→                                <Edit className="h-4 w-4 text-muted-foreground" />
+   615→                              </Button>
+   616→                              <Button
+   617→                                variant="ghost"
+   618→                                size="icon"
+   619→                                className="h-8 w-8"
+   620→                                onClick={() => openDelete(invoice)}
+   621→                                title={isAr ? 'حذف' : 'Delete'}
+   622→                              >
+   623→                                <Trash2 className="h-4 w-4 text-destructive" />
+   624→                              </Button>
+   625→                            </div>
+   626→                          </TableCell>
+   627→                        </TableRow>
+   628→                      );
+   629→                    })
+   630→                  )}
+   631→                </TableBody>
+   632→              </Table>
+   633→            </ScrollArea>
+   634→          </CardContent>
+   635→        </Card>
+   636→
+   637→        {/* ── Summary Cards ───────────────────────────────────────────── */}
+   638→        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   639→          <Card>
+   640→            <CardContent className="p-4 flex items-center gap-3">
+   641→              <div className="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-950 flex items-center justify-center">
+   642→                <Calculator className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+   643→              </div>
+   644→              <div>
+   645→                <p className="text-xs text-muted-foreground">{isAr ? 'إجمالي المجموع الفرعي' : 'Total Subtotal'}</p>
+   646→                <p className="text-lg font-bold">
+   647→                  {formatCurrency(
+   648→                    invoices.reduce((s, inv) => s + calcSubtotal(inv.lineItems), 0)
+   649→                  )}
+   650→                </p>
+   651→              </div>
+   652→            </CardContent>
+   653→          </Card>
+   654→          <Card>
+   655→            <CardContent className="p-4 flex items-center gap-3">
+   656→              <div className="w-10 h-10 rounded-lg bg-amber-50 dark:bg-amber-950 flex items-center justify-center">
+   657→                <Calculator className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+   658→              </div>
+   659→              <div>
+   660→                <p className="text-xs text-muted-foreground">{isAr ? 'إجمالي الضريبة (١٤٪)' : 'Total Tax (14%)'}</p>
+   661→                <p className="text-lg font-bold">
+   662→                  {formatCurrency(
+   663→                    invoices.reduce((s, inv) => s + calcTaxTotal(inv.lineItems), 0)
+   664→                  )}
+   665→                </p>
+   666→              </div>
+   667→            </CardContent>
+   668→          </Card>
+   669→          <Card>
+   670→            <CardContent className="p-4 flex items-center gap-3">
+   671→              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+   672→                <FileText className="h-5 w-5 text-primary" />
+   673→              </div>
+   674→              <div>
+   675→                <p className="text-xs text-muted-foreground">{isAr ? 'الإجمالي الكلي' : 'Grand Total'}</p>
+   676→                <p className="text-lg font-bold">
+   677→                  {formatCurrency(
+   678→                    invoices.reduce((s, inv) => s + calcGrandTotal(inv.lineItems), 0)
+   679→                  )}
+   680→                </p>
+   681→              </div>
+   682→            </CardContent>
+   683→          </Card>
+   684→        </div>
+   685→
+   686→        {/* ── Create / Edit Dialog ────────────────────────────────────── */}
+   687→        <Dialog open={formOpen} onOpenChange={(open) => {
+   688→          if (!open) { resetForm(); }
+   689→          setFormOpen(open);
+   690→        }}>
+   691→          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" dir={isAr ? 'rtl' : 'ltr'}>
+   692→            <DialogHeader>
+   693→              <DialogTitle className="flex items-center gap-2">
+   694→                <FileText className="h-5 w-5 text-primary" />
+   695→                {editingInvoice ? t.editInvoice : t.newInvoice}
+   696→              </DialogTitle>
+   697→            </DialogHeader>
+   698→
+   699→            <div className="space-y-6">
+   700→              {/* Header fields */}
+   701→              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   702→                <div className="space-y-2">
+   703→                  <Label>{t.customer}</Label>
+   704→                  <Select value={formCustomerId} onValueChange={setFormCustomerId}>
+   705→                    <SelectTrigger className="w-full">
+   706→                      <SelectValue placeholder={isAr ? 'اختر العميل' : 'Select customer'} />
+   707→                    </SelectTrigger>
+   708→                    <SelectContent>
+   709→                      {mockCustomers.map((c) => (
+   710→                        <SelectItem key={c.id} value={c.id}>
+   711→                          {c.name}
+   712→                        </SelectItem>
+   713→                      ))}
+   714→                    </SelectContent>
+   715→                  </Select>
+   716→                </div>
+   717→                <div className="space-y-2">
+   718→                  <Label>{t.issueDate}</Label>
+   719→                  <Input
+   720→                    type="date"
+   721→                    value={formIssueDate}
+   722→                    onChange={(e) => setFormIssueDate(e.target.value)}
+   723→                  />
+   724→                </div>
+   725→                <div className="space-y-2">
+   726→                  <Label>{t.dueDate}</Label>
+   727→                  <Input
+   728→                    type="date"
+   729→                    value={formDueDate}
+   730→                    onChange={(e) => setFormDueDate(e.target.value)}
+   731→                  />
+   732→                </div>
+   733→              </div>
+   734→
+   735→              <Separator />
+   736→
+   737→              {/* Line Items */}
+   738→              <div className="space-y-3">
+   739→                <div className="flex items-center justify-between">
+   740→                  <Label className="text-base font-semibold">{t.lineItems}</Label>
+   741→                  <Button type="button" variant="outline" size="sm" onClick={addLineItem} className="gap-1.5">
+   742→                    <Plus className="h-3.5 w-3.5" />
+   743→                    {isAr ? 'إضافة بند' : 'Add Item'}
+   744→                  </Button>
+   745→                </div>
+   746→
+   747→                <ScrollArea className="w-full">
+   748→                  <div className="min-w-[600px]">
+   749→                    {/* Header row */}
+   750→                    <div className="grid grid-cols-[1fr_80px_100px_80px_90px_90px_32px] gap-2 text-xs font-medium text-muted-foreground px-1 pb-2">
+   751→                      <span>{t.description}</span>
+   752→                      <span className="text-center">{t.quantity}</span>
+   753→                      <span className="text-center">{t.unitPrice}</span>
+   754→                      <span className="text-center">{t.taxRate}</span>
+   755→                      <span className="text-center">{isAr ? 'ضريبة' : 'Tax Amt'}</span>
+   756→                      <span className="text-center">{isAr ? 'الإجمالي' : 'Total'}</span>
+   757→                      <span></span>
+   758→                    </div>
+   759→
+   760→                    {formLineItems.map((item, idx) => {
+   761→                      const lineTax = calcLineTaxAmount(item);
+   762→                      const lineTotal = calcLineTotal(item);
+   763→                      return (
+   764→                        <div
+   765→                          key={item.id}
+   766→                          className="grid grid-cols-[1fr_80px_100px_80px_90px_90px_32px] gap-2 items-center pb-2"
+   767→                        >
+   768→                          <Input
+   769→                            placeholder={isAr ? 'وصف البند' : 'Item description'}
+   770→                            value={item.description}
+   771→                            onChange={(e) => updateLineItem(item.id, 'description', e.target.value)}
+   772→                            className="h-9 text-sm"
+   773→                          />
+   774→                          <Input
+   775→                            type="number"
+   776→                            min="1"
+   777→                            value={item.quantity}
+   778→                            onChange={(e) =>
+   779→                              updateLineItem(item.id, 'quantity', Number(e.target.value) || 0)
+   780→                            }
+   781→                            className="h-9 text-sm text-center"
+   782→                          />
+   783→                          <Input
+   784→                            type="number"
+   785→                            min="0"
+   786→                            step="0.01"
+   787→                            value={item.unitPrice || ''}
+   788→                            onChange={(e) =>
+   789→                              updateLineItem(item.id, 'unitPrice', Number(e.target.value) || 0)
+   790→                            }
+   791→                            className="h-9 text-sm text-center"
+   792→                            placeholder="0.00"
+   793→                          />
+   794→                          <Input
+   795→                            type="number"
+   796→                            min="0"
+   797→                            step="0.5"
+   798→                            value={item.taxRate}
+   799→                            onChange={(e) =>
+   800→                              updateLineItem(item.id, 'taxRate', Number(e.target.value) || 0)
+   801→                            }
+   802→                            className="h-9 text-sm text-center"
+   803→                          />
+   804→                          <div className="h-9 flex items-center justify-center rounded-md bg-muted/60 text-sm font-medium px-2">
+   805→                            {formatCurrency(lineTax)}
+   806→                          </div>
+   807→                          <div className="h-9 flex items-center justify-center rounded-md bg-primary/10 text-sm font-semibold px-2">
+   808→                            {formatCurrency(lineTotal)}
+   809→                          </div>
+   810→                          <Button
+   811→                            type="button"
+   812→                            variant="ghost"
+   813→                            size="icon"
+   814→                            className="h-8 w-8"
+   815→                            onClick={() => removeLineItem(item.id)}
+   816→                            disabled={formLineItems.length <= 1}
+   817→                          >
+   818→                            <X className="h-4 w-4 text-muted-foreground" />
+   819→                          </Button>
+   820→                        </div>
+   821→                      );
+   822→                    })}
+   823→                  </div>
+   824→                </ScrollArea>
+   825→              </div>
+   826→
+   827→              <Separator />
+   828→
+   829→              {/* Totals */}
+   830→              <div className="flex flex-col items-start sm:items-end gap-2">
+   831→                <div className="w-full sm:w-72 space-y-2">
+   832→                  <div className="flex items-center justify-between text-sm">
+   833→                    <span className="text-muted-foreground">{t.subtotal}</span>
+   834→                    <span className="font-medium">{formatCurrency(formSubtotal)}</span>
+   835→                  </div>
+   836→                  <div className="flex items-center justify-between text-sm">
+   837→                    <span className="text-muted-foreground">
+   838→                      {t.tax} ({EGYPT_VAT}%)
+   839→                    </span>
+   840→                    <span className="font-medium">{formatCurrency(formTaxTotal)}</span>
+   841→                  </div>
+   842→                  <Separator />
+   843→                  <div className="flex items-center justify-between text-base font-bold">
+   844→                    <span>{t.total}</span>
+   845→                    <span className="text-primary">{formatCurrency(formGrandTotal)}</span>
+   846→                  </div>
+   847→                </div>
+   848→              </div>
+   849→
+   850→              <Separator />
+   851→
+   852→              {/* Notes */}
+   853→              <div className="space-y-2">
+   854→                <Label>{t.notes}</Label>
+   855→                <Textarea
+   856→                  placeholder={isAr ? 'ملاحظات إضافية...' : 'Additional notes...'}
+   857→                  value={formNotes}
+   858→                  onChange={(e) => setFormNotes(e.target.value)}
+   859→                  rows={3}
+   860→                />
+   861→              </div>
+   862→            </div>
+   863→
+   864→            <DialogFooter className="gap-2 sm:gap-0">
+   865→              <Button variant="outline" onClick={() => { setFormOpen(false); resetForm(); }}>
+   866→                {t.cancel}
+   867→              </Button>
+   868→              <Button onClick={handleSave}>
+   869→                {editingInvoice ? t.save : t.create}
+   870→              </Button>
+   871→            </DialogFooter>
+   872→          </DialogContent>
+   873→        </Dialog>
+   874→
+   875→        {/* ── Detail View Dialog ──────────────────────────────────────── */}
+   876→        <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+   877→          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" dir={isAr ? 'rtl' : 'ltr'}>
+   878→            <DialogHeader>
+   879→              <DialogTitle className="flex items-center gap-2">
+   880→                <Eye className="h-5 w-5 text-primary" />
+   881→                {isAr ? 'تفاصيل الفاتورة' : 'Invoice Details'}
+   882→              </DialogTitle>
+   883→            </DialogHeader>
+   884→
+   885→            {viewingInvoice && (
+   886→              <div className="space-y-6">
+   887→                {/* Invoice header info */}
+   888→                <div className="grid grid-cols-2 gap-4">
+   889→                  <div className="space-y-1">
+   890→                    <p className="text-xs text-muted-foreground">{t.invoiceNumber}</p>
+   891→                    <p className="font-mono font-semibold">{viewingInvoice.invoiceNumber}</p>
+   892→                  </div>
+   893→                  <div className="space-y-1">
+   894→                    <p className="text-xs text-muted-foreground">{t.status}</p>
+   895→                    <Badge variant="outline" className={statusConfig[viewingInvoice.status].className}>
+   896→                      {isAr ? statusConfig[viewingInvoice.status].labelAr : statusConfig[viewingInvoice.status].labelEn}
+   897→                    </Badge>
+   898→                  </div>
+   899→                  <div className="space-y-1">
+   900→                    <p className="text-xs text-muted-foreground">{t.customer}</p>
+   901→                    <p className="font-medium">{viewingInvoice.customerName}</p>
+   902→                  </div>
+   903→                  <div className="space-y-1">
+   904→                    <p className="text-xs text-muted-foreground">{isAr ? 'الرقم الضريبي' : 'Tax Number'}</p>
+   905→                    <p className="font-mono text-sm">300-000-0000</p>
+   906→                  </div>
+   907→                  <div className="space-y-1">
+   908→                    <p className="text-xs text-muted-foreground">{t.issueDate}</p>
+   909→                    <p className="text-sm">{formatDate(viewingInvoice.issueDate)}</p>
+   910→                  </div>
+   911→                  <div className="space-y-1">
+   912→                    <p className="text-xs text-muted-foreground">{t.dueDate}</p>
+   913→                    <p className="text-sm">{formatDate(viewingInvoice.dueDate)}</p>
+   914→                  </div>
+   915→                </div>
+   916→
+   917→                <Separator />
+   918→
+   919→                {/* Line items */}
+   920→                <div className="space-y-2">
+   921→                  <p className="text-sm font-semibold">{t.lineItems}</p>
+   922→                  <div className="rounded-lg border overflow-hidden">
+   923→                    <Table>
+   924→                      <TableHeader>
+   925→                        <TableRow>
+   926→                          <TableHead className="text-center">#</TableHead>
+   927→                          <TableHead>{t.description}</TableHead>
+   928→                          <TableHead className="text-center">{t.quantity}</TableHead>
+   929→                          <TableHead className="text-center">{t.unitPrice}</TableHead>
+   930→                          <TableHead className="text-center">{t.taxRate}</TableHead>
+   931→                          <TableHead className="text-center">{isAr ? 'الضريبة' : 'Tax'}</TableHead>
+   932→                          <TableHead className="text-center">{t.total}</TableHead>
+   933→                        </TableRow>
+   934→                      </TableHeader>
+   935→                      <TableBody>
+   936→                        {viewingInvoice.lineItems.map((li, idx) => (
+   937→                          <TableRow key={li.id}>
+   938→                            <TableCell className="text-center text-muted-foreground text-sm">
+   939→                              {idx + 1}
+   940→                            </TableCell>
+   941→                            <TableCell className="font-medium">{li.description}</TableCell>
+   942→                            <TableCell className="text-center">{li.quantity}</TableCell>
+   943→                            <TableCell className="text-center">{formatCurrency(li.unitPrice)}</TableCell>
+   944→                            <TableCell className="text-center">{li.taxRate}%</TableCell>
+   945→                            <TableCell className="text-center">{formatCurrency(calcLineTaxAmount(li))}</TableCell>
+   946→                            <TableCell className="text-center font-semibold">
+   947→                              {formatCurrency(calcLineTotal(li))}
+   948→                            </TableCell>
+   949→                          </TableRow>
+   950→                        ))}
+   951→                      </TableBody>
+   952→                    </Table>
+   953→                  </div>
+   954→                </div>
+   955→
+   956→                <Separator />
+   957→
+   958→                {/* Totals */}
+   959→                <div className="flex justify-end">
+   960→                  <div className="w-72 space-y-2">
+   961→                    <div className="flex items-center justify-between text-sm">
+   962→                      <span className="text-muted-foreground">{t.subtotal}</span>
+   963→                      <span className="font-medium">
+   964→                        {formatCurrency(calcSubtotal(viewingInvoice.lineItems))}
+   965→                      </span>
+   966→                    </div>
+   967→                    <div className="flex items-center justify-between text-sm">
+   968→                      <span className="text-muted-foreground">
+   969→                        {t.tax} ({EGYPT_VAT}%)
+   970→                      </span>
+   971→                      <span className="font-medium">
+   972→                        {formatCurrency(calcTaxTotal(viewingInvoice.lineItems))}
+   973→                      </span>
+   974→                    </div>
+   975→                    <Separator />
+   976→                    <div className="flex items-center justify-between text-base font-bold">
+   977→                      <span>{t.total}</span>
+   978→                      <span className="text-primary">
+   979→                        {formatCurrency(calcGrandTotal(viewingInvoice.lineItems))}
+   980→                      </span>
+   981→                    </div>
+   982→                  </div>
+   983→                </div>
+   984→
+   985→                {/* Notes */}
+   986→                {viewingInvoice.notes && (
+   987→                  <>
+   988→                    <Separator />
+   989→                    <div className="space-y-1">
+   990→                      <p className="text-xs text-muted-foreground">{t.notes}</p>
+   991→                      <p className="text-sm bg-muted/50 rounded-lg p-3">{viewingInvoice.notes}</p>
+   992→                    </div>
+   993→                  </>
+   994→                )}
+   995→              </div>
+   996→            )}
+   997→          </DialogContent>
+   998→        </Dialog>
+   999→
+  1000→        {/* ── Delete Confirmation Dialog ──────────────────────────────── */}
+  1001→        <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+  1002→          <DialogContent className="max-w-md" dir={isAr ? 'rtl' : 'ltr'}>
+  1003→            <DialogHeader>
+  1004→              <DialogTitle className="flex items-center gap-2 text-destructive">
+  1005→                <Trash2 className="h-5 w-5" />
+  1006→                {isAr ? 'حذف الفاتورة' : 'Delete Invoice'}
+  1007→              </DialogTitle>
+  1008→              <DialogDescription>
+  1009→                {t.areYouSure}
+  1010→              </DialogDescription>
+  1011→            </DialogHeader>
+  1012→            <div className="bg-destructive/5 border border-destructive/20 rounded-lg p-4">
+  1013→              <p className="text-sm text-muted-foreground">
+  1014→                {deletingInvoice && (
+  1015→                  <>
+  1016→                    {isAr ? 'سيتم حذف الفاتورة' : 'You are about to delete invoice'}{' '}
+  1017→                    <span className="font-mono font-semibold text-foreground">
+  1018→                      {deletingInvoice.invoiceNumber}
+  1019→                    </span>{' '}
+  1020→                    {isAr ? 'للعميل' : 'for customer'}{' '}
+  1021→                    <span className="font-semibold text-foreground">
+  1022→                      {deletingInvoice.customerName}
+  1023→                    </span>
+  1024→                  </>
+  1025→                )}
+  1026→              </p>
+  1027→              <p className="text-xs text-destructive mt-2">{t.thisActionCannot}</p>
+  1028→            </div>
+  1029→            <DialogFooter className="gap-2 sm:gap-0">
+  1030→              <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+  1031→                {t.cancel}
+  1032→              </Button>
+  1033→              <Button variant="destructive" onClick={handleDelete}>
+  1034→                {t.delete}
+  1035→              </Button>
+  1036→            </DialogFooter>
+  1037→          </DialogContent>
+  1038→        </Dialog>
+  1039→      </div>
+  1040→    </AppShell>
+  1041→  );
+  1042→}
+  1043→

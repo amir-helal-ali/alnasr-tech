@@ -1,2 +1,0 @@
-fn(State<Pool<Postgres>>, Claims, axum::extract::Path<Uuid>, axum::Json<UpdateCustomerRequest>) -> impl std::future::Future<Output = Result<axum::Json<CustomerResponse>, AppError>> {update_customer}
-fn(State<Pool<Postgres>>, Claims, axum::extract::Path<Uuid>, axum::Json<UpdateCustomerRequest>) -> impl std::future::Future<Output = Result<axum::Json<CustomerResponse>, AppError>> {update_customer}: Handler<_, ()>

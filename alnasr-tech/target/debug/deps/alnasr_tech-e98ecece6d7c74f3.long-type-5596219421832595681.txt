@@ -1,2 +1,0 @@
-fn(State<Pool<Postgres>>, Claims, axum::Json<CreateInvoiceRequest>) -> impl std::future::Future<Output = Result<axum::Json<InvoiceDetailResponse>, AppError>> {create_invoice}
-fn(State<Pool<Postgres>>, Claims, axum::Json<CreateInvoiceRequest>) -> impl std::future::Future<Output = Result<axum::Json<InvoiceDetailResponse>, AppError>> {create_invoice}: Handler<_, ()>

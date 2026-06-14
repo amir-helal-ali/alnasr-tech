@@ -1,0 +1,784 @@
+     1→'use client';
+     2→
+     3→import { useState, useMemo, useCallback } from 'react';
+     4→import { useAppSettings } from '@/lib/store';
+     5→import { translations } from '@/lib/i18n';
+     6→import { AppShell } from '@/components/app-shell';
+     7→import { Badge } from '@/components/ui/badge';
+     8→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+     9→import { Button } from '@/components/ui/button';
+    10→import { Input } from '@/components/ui/input';
+    11→import { Label } from '@/components/ui/label';
+    12→import { Textarea } from '@/components/ui/textarea';
+    13→import {
+    14→  Dialog,
+    15→  DialogContent,
+    16→  DialogHeader,
+    17→  DialogTitle,
+    18→  DialogFooter,
+    19→} from '@/components/ui/dialog';
+    20→import {
+    21→  AlertDialog,
+    22→  AlertDialogAction,
+    23→  AlertDialogCancel,
+    24→  AlertDialogContent,
+    25→  AlertDialogDescription,
+    26→  AlertDialogFooter,
+    27→  AlertDialogHeader,
+    28→  AlertDialogTitle,
+    29→} from '@/components/ui/alert-dialog';
+    30→import {
+    31→  Table,
+    32→  TableBody,
+    33→  TableCell,
+    34→  TableHead,
+    35→  TableHeader,
+    36→  TableRow,
+    37→} from '@/components/ui/table';
+    38→import {
+    39→  Pagination,
+    40→  PaginationContent,
+    41→  PaginationItem,
+    42→  PaginationLink,
+    43→  PaginationNext,
+    44→  PaginationPrevious,
+    45→} from '@/components/ui/pagination';
+    46→import { Search, Plus, Edit, Trash2, Eye, Users, Loader2 } from 'lucide-react';
+    47→import { toast } from 'sonner';
+    48→
+    49→// Types
+    50→interface Customer {
+    51→  id: string;
+    52→  name: string;
+    53→  nameAr: string;
+    54→  email: string;
+    55→  phone: string;
+    56→  address: string;
+    57→  taxNumber: string;
+    58→  isActive: boolean;
+    59→  createdAt: string;
+    60→}
+    61→
+    62→interface CustomerFormData {
+    63→  name: string;
+    64→  nameAr: string;
+    65→  email: string;
+    66→  phone: string;
+    67→  address: string;
+    68→  taxNumber: string;
+    69→}
+    70→
+    71→const initialFormData: CustomerFormData = {
+    72→  name: '',
+    73→  nameAr: '',
+    74→  email: '',
+    75→  phone: '',
+    76→  address: '',
+    77→  taxNumber: '',
+    78→};
+    79→
+    80→// Mock data - realistic Egyptian company names
+    81→const initialCustomers: Customer[] = [
+    82→  {
+    83→    id: '1',
+    84→    name: 'Al-Nile Trading Co.',
+    85→    nameAr: 'شركة النيل للتجارة',
+    86→    email: 'info@alnile-trading.com',
+    87→    phone: '+20 2 2345 6789',
+    88→    address: '15 شارع النيل، المعادي، القاهرة',
+    89→    taxNumber: '300-123-4567',
+    90→    isActive: true,
+    91→    createdAt: '2025-01-15',
+    92→  },
+    93→  {
+    94→    id: '2',
+    95→    name: 'Al-Ahram Establishment',
+    96→    nameAr: 'مؤسسة الأهرام',
+    97→    email: 'contact@alahram-eg.com',
+    98→    phone: '+20 2 2678 9012',
+    99→    address: '42 شارع الأهرام، الجيزة',
+   100→    taxNumber: '301-234-5678',
+   101→    isActive: true,
+   102→    createdAt: '2025-02-20',
+   103→  },
+   104→  {
+   105→    id: '3',
+   106→    name: 'Al-Salam Import Co.',
+   107→    nameAr: 'شركة السلام للاستيراد',
+   108→    email: 'sales@alsalam-import.com',
+   109→    phone: '+20 3 4567 8901',
+   110→    address: '8 شارع السلام، الإسكندرية',
+   111→    taxNumber: '302-345-6789',
+   112→    isActive: true,
+   113→    createdAt: '2025-03-10',
+   114→  },
+   115→  {
+   116→    id: '4',
+   117→    name: 'Al-Hurriya Industrial Factory',
+   118→    nameAr: 'مصنع الحرية الصناعي',
+   119→    email: 'factory@hurriya-ind.com',
+   120→    phone: '+20 2 2890 1234',
+   121→    address: 'المنطقة الصناعية، حلوان، القاهرة',
+   122→    taxNumber: '303-456-7890',
+   123→    isActive: false,
+   124→    createdAt: '2025-03-25',
+   125→  },
+   126→  {
+   127→    id: '5',
+   128→    name: 'Al-Wadi Distribution Co.',
+   129→    nameAr: 'شركة الوادي للتوزيع',
+   130→    email: 'info@alwadi-dist.com',
+   131→    phone: '+20 2 3123 4567',
+   132→    address: '33 شارع الوادي، مدينة نصر، القاهرة',
+   133→    taxNumber: '304-567-8901',
+   134→    isActive: true,
+   135→    createdAt: '2025-04-05',
+   136→  },
+   137→  {
+   138→    id: '6',
+   139→    name: 'Al-Nour Holding Group',
+   140→    nameAr: 'مجموعة النور القابضة',
+   141→    email: 'hq@alnour-holding.com',
+   142→    phone: '+20 2 4456 7890',
+   143→    address: 'مجمع النور، طريق مصر الإسماعيلية الصحراوي',
+   144→    taxNumber: '305-678-9012',
+   145→    isActive: true,
+   146→    createdAt: '2025-04-18',
+   147→  },
+   148→  {
+   149→    id: '7',
+   150→    name: 'Al-Fath Construction Co.',
+   151→    nameAr: 'شركة الفتح للبناء',
+   152→    email: 'projects@alfath-build.com',
+   153→    phone: '+20 2 5789 0123',
+   154→    address: '77 شارع التحرير، الدقي، الجيزة',
+   155→    taxNumber: '306-789-0123',
+   156→    isActive: true,
+   157→    createdAt: '2025-05-02',
+   158→  },
+   159→  {
+   160→    id: '8',
+   161→    name: 'Al-Safa Trading Establishment',
+   162→    nameAr: 'مؤسسة الصفا التجارية',
+   163→    email: 'office@alsafa-trade.com',
+   164→    phone: '+20 3 6012 3456',
+   165→    address: '21 شارع الصفا، سموحة، الإسكندرية',
+   166→    taxNumber: '307-890-1234',
+   167→    isActive: false,
+   168→    createdAt: '2025-05-20',
+   169→  },
+   170→];
+   171→
+   172→const ITEMS_PER_PAGE = 5;
+   173→
+   174→export default function CustomersPage() {
+   175→  const { language } = useAppSettings();
+   176→  const t = translations[language];
+   177→  const isRtl = language === 'ar';
+   178→
+   179→  // State
+   180→  const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
+   181→  const [searchQuery, setSearchQuery] = useState('');
+   182→  const [currentPage, setCurrentPage] = useState(1);
+   183→  const [isDialogOpen, setIsDialogOpen] = useState(false);
+   184→  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+   185→  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+   186→  const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
+   187→  const [formData, setFormData] = useState<CustomerFormData>(initialFormData);
+   188→  const [isSubmitting, setIsSubmitting] = useState(false);
+   189→  const [isDeleting, setIsDeleting] = useState(false);
+   190→  const [isLoading, setIsLoading] = useState(true);
+   191→
+   192→  // Simulate initial loading
+   193→  useState(() => {
+   194→    const timer = setTimeout(() => setIsLoading(false), 800);
+   195→    return () => clearTimeout(timer);
+   196→  });
+   197→
+   198→  // Filtered customers
+   199→  const filteredCustomers = useMemo(() => {
+   200→    if (!searchQuery.trim()) return customers;
+   201→    const query = searchQuery.toLowerCase();
+   202→    return customers.filter(
+   203→      (c) =>
+   204→        c.name.toLowerCase().includes(query) ||
+   205→        c.nameAr.includes(query) ||
+   206→        c.email.toLowerCase().includes(query) ||
+   207→        c.phone.includes(query)
+   208→    );
+   209→  }, [customers, searchQuery]);
+   210→
+   211→  // Pagination
+   212→  const totalPages = Math.ceil(filteredCustomers.length / ITEMS_PER_PAGE);
+   213→  const paginatedCustomers = useMemo(() => {
+   214→    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+   215→    return filteredCustomers.slice(start, start + ITEMS_PER_PAGE);
+   216→  }, [filteredCustomers, currentPage]);
+   217→
+   218→  // Reset page when search changes
+   219→  const handleSearchChange = useCallback((value: string) => {
+   220→    setSearchQuery(value);
+   221→    setCurrentPage(1);
+   222→  }, []);
+   223→
+   224→  // Open create dialog
+   225→  const handleCreate = useCallback(() => {
+   226→    setEditingCustomer(null);
+   227→    setFormData(initialFormData);
+   228→    setIsDialogOpen(true);
+   229→  }, []);
+   230→
+   231→  // Open edit dialog
+   232→  const handleEdit = useCallback((customer: Customer) => {
+   233→    setEditingCustomer(customer);
+   234→    setFormData({
+   235→      name: customer.name,
+   236→      nameAr: customer.nameAr,
+   237→      email: customer.email,
+   238→      phone: customer.phone,
+   239→      address: customer.address,
+   240→      taxNumber: customer.taxNumber,
+   241→    });
+   242→    setIsDialogOpen(true);
+   243→  }, []);
+   244→
+   245→  // Open delete confirmation
+   246→  const handleDeleteClick = useCallback((customer: Customer) => {
+   247→    setDeletingCustomer(customer);
+   248→    setIsDeleteDialogOpen(true);
+   249→  }, []);
+   250→
+   251→  // Submit form (create or edit)
+   252→  const handleSubmit = useCallback(async () => {
+   253→    if (!formData.name.trim()) {
+   254→      toast.error(isRtl ? 'اسم العميل مطلوب' : 'Customer name is required');
+   255→      return;
+   256→    }
+   257→
+   258→    setIsSubmitting(true);
+   259→    // Simulate API call
+   260→    await new Promise((resolve) => setTimeout(resolve, 600));
+   261→
+   262→    if (editingCustomer) {
+   263→      setCustomers((prev) =>
+   264→        prev.map((c) =>
+   265→          c.id === editingCustomer.id
+   266→            ? { ...c, ...formData }
+   267→            : c
+   268→        )
+   269→      );
+   270→      toast.success(
+   271→        isRtl ? 'تم تحديث العميل بنجاح' : 'Customer updated successfully'
+   272→      );
+   273→    } else {
+   274→      const newCustomer: Customer = {
+   275→        id: String(Date.now()),
+   276→        ...formData,
+   277→        isActive: true,
+   278→        createdAt: new Date().toISOString().split('T')[0],
+   279→      };
+   280→      setCustomers((prev) => [newCustomer, ...prev]);
+   281→      toast.success(
+   282→        isRtl ? 'تم إنشاء العميل بنجاح' : 'Customer created successfully'
+   283→      );
+   284→    }
+   285→
+   286→    setIsSubmitting(false);
+   287→    setIsDialogOpen(false);
+   288→    setFormData(initialFormData);
+   289→    setEditingCustomer(null);
+   290→  }, [formData, editingCustomer, isRtl]);
+   291→
+   292→  // Confirm delete
+   293→  const handleConfirmDelete = useCallback(async () => {
+   294→    if (!deletingCustomer) return;
+   295→
+   296→    setIsDeleting(true);
+   297→    // Simulate API call
+   298→    await new Promise((resolve) => setTimeout(resolve, 600));
+   299→
+   300→    setCustomers((prev) => prev.filter((c) => c.id !== deletingCustomer.id));
+   301→    toast.success(
+   302→      isRtl ? 'تم حذف العميل بنجاح' : 'Customer deleted successfully'
+   303→    );
+   304→
+   305→    setIsDeleting(false);
+   306→    setIsDeleteDialogOpen(false);
+   307→    setDeletingCustomer(null);
+   308→
+   309→    // Adjust page if needed
+   310→    const remaining = filteredCustomers.length - 1;
+   311→    const maxPage = Math.ceil(remaining / ITEMS_PER_PAGE);
+   312→    if (currentPage > maxPage && maxPage > 0) {
+   313→      setCurrentPage(maxPage);
+   314→    }
+   315→  }, [deletingCustomer, filteredCustomers.length, currentPage]);
+   316→
+   317→  // Update form field
+   318→  const updateField = useCallback(
+   319→    (field: keyof CustomerFormData, value: string) => {
+   320→      setFormData((prev) => ({ ...prev, [field]: value }));
+   321→    },
+   322→    []
+   323→  );
+   324→
+   325→  // Generate page numbers for pagination
+   326→  const getPageNumbers = useCallback(() => {
+   327→    const pages: number[] = [];
+   328→    for (let i = 1; i <= totalPages; i++) {
+   329→      pages.push(i);
+   330→    }
+   331→    return pages;
+   332→  }, [totalPages]);
+   333→
+   334→  return (
+   335→    <AppShell>
+   336→      <div className="space-y-6">
+   337→        {/* Page Header */}
+   338→        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+   339→          <div className="flex items-center gap-3">
+   340→            <div className="bg-primary/10 p-2.5 rounded-xl">
+   341→              <Users className="h-6 w-6 text-primary" />
+   342→            </div>
+   343→            <div>
+   344→              <h1 className="text-2xl font-bold text-foreground">
+   345→                {t.customers}
+   346→              </h1>
+   347→              <p className="text-muted-foreground text-sm mt-0.5">
+   348→                {isRtl
+   349→                  ? `${customers.length} عميل مسجل`
+   350→                  : `${customers.length} registered customers`}
+   351→              </p>
+   352→            </div>
+   353→          </div>
+   354→          <Button onClick={handleCreate} className="gap-2">
+   355→            <Plus className="h-4 w-4" />
+   356→            {t.newCustomer}
+   357→          </Button>
+   358→        </div>
+   359→
+   360→        {/* Search Bar */}
+   361→        <Card>
+   362→          <CardContent className="p-4">
+   363→            <div className="relative">
+   364→              <Search className="absolute top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground start-3" />
+   365→              <Input
+   366→                placeholder={
+   367→                  isRtl
+   368→                    ? 'ابحث بالاسم أو البريد الإلكتروني أو الهاتف...'
+   369→                    : 'Search by name, email, or phone...'
+   370→                }
+   371→                value={searchQuery}
+   372→                onChange={(e) => handleSearchChange(e.target.value)}
+   373→                className="ps-9"
+   374→              />
+   375→            </div>
+   376→          </CardContent>
+   377→        </Card>
+   378→
+   379→        {/* Data Table */}
+   380→        <Card>
+   381→          <CardHeader className="pb-0">
+   382→            <CardTitle className="text-base">
+   383→              {isRtl ? 'قائمة العملاء' : 'Customer List'}
+   384→            </CardTitle>
+   385→          </CardHeader>
+   386→          <CardContent className="p-0">
+   387→            {isLoading ? (
+   388→              // Loading State
+   389→              <div className="space-y-0">
+   390→                <Table>
+   391→                  <TableHeader>
+   392→                    <TableRow>
+   393→                      <TableHead className="text-start">{t.name}</TableHead>
+   394→                      <TableHead className="text-start">{t.customerNameAr}</TableHead>
+   395→                      <TableHead className="text-start hidden md:table-cell">{t.email}</TableHead>
+   396→                      <TableHead className="text-start hidden lg:table-cell">{t.phone}</TableHead>
+   397→                      <TableHead className="text-start hidden xl:table-cell">{t.taxNumber}</TableHead>
+   398→                      <TableHead className="text-start">{t.status}</TableHead>
+   399→                      <TableHead className="text-start">{t.actions}</TableHead>
+   400→                    </TableRow>
+   401→                  </TableHeader>
+   402→                  <TableBody>
+   403→                    {Array.from({ length: 5 }).map((_, i) => (
+   404→                      <TableRow key={i}>
+   405→                        <TableCell>
+   406→                          <div className="h-4 w-32 bg-muted animate-pulse rounded" />
+   407→                        </TableCell>
+   408→                        <TableCell>
+   409→                          <div className="h-4 w-28 bg-muted animate-pulse rounded" />
+   410→                        </TableCell>
+   411→                        <TableCell className="hidden md:table-cell">
+   412→                          <div className="h-4 w-36 bg-muted animate-pulse rounded" />
+   413→                        </TableCell>
+   414→                        <TableCell className="hidden lg:table-cell">
+   415→                          <div className="h-4 w-28 bg-muted animate-pulse rounded" />
+   416→                        </TableCell>
+   417→                        <TableCell className="hidden xl:table-cell">
+   418→                          <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+   419→                        </TableCell>
+   420→                        <TableCell>
+   421→                          <div className="h-5 w-14 bg-muted animate-pulse rounded-full" />
+   422→                        </TableCell>
+   423→                        <TableCell>
+   424→                          <div className="flex gap-1">
+   425→                            <div className="h-8 w-8 bg-muted animate-pulse rounded" />
+   426→                            <div className="h-8 w-8 bg-muted animate-pulse rounded" />
+   427→                          </div>
+   428→                        </TableCell>
+   429→                      </TableRow>
+   430→                    ))}
+   431→                  </TableBody>
+   432→                </Table>
+   433→              </div>
+   434→            ) : paginatedCustomers.length === 0 ? (
+   435→              // Empty State
+   436→              <div className="flex flex-col items-center justify-center py-16 px-4">
+   437→                <div className="bg-muted/50 p-4 rounded-full mb-4">
+   438→                  <Users className="h-10 w-10 text-muted-foreground" />
+   439→                </div>
+   440→                <h3 className="text-lg font-semibold text-foreground mb-1">
+   441→                  {searchQuery
+   442→                    ? isRtl
+   443→                      ? 'لا توجد نتائج'
+   444→                      : 'No results found'
+   445→                    : t.noData}
+   446→                </h3>
+   447→                <p className="text-sm text-muted-foreground text-center max-w-sm">
+   448→                  {searchQuery
+   449→                    ? isRtl
+   450→                      ? `لم يتم العثور على عملاء مطابقين لـ "${searchQuery}"`
+   451→                      : `No customers matching "${searchQuery}"`
+   452→                    : isRtl
+   453→                      ? 'لم يتم إضافة أي عملاء بعد. اضغط على "عميل جديد" لإضافة أول عميل.'
+   454→                      : 'No customers have been added yet. Click "New Customer" to add your first customer.'}
+   455→                </p>
+   456→                {searchQuery && (
+   457→                  <Button
+   458→                    variant="outline"
+   459→                    className="mt-4"
+   460→                    onClick={() => handleSearchChange('')}
+   461→                  >
+   462→                    {isRtl ? 'مسح البحث' : 'Clear Search'}
+   463→                  </Button>
+   464→                )}
+   465→              </div>
+   466→            ) : (
+   467→              // Data Table
+   468→              <>
+   469→                <div className="overflow-x-auto">
+   470→                  <Table>
+   471→                    <TableHeader>
+   472→                      <TableRow>
+   473→                        <TableHead className="text-start">{t.name}</TableHead>
+   474→                        <TableHead className="text-start">{t.customerNameAr}</TableHead>
+   475→                        <TableHead className="text-start hidden md:table-cell">{t.email}</TableHead>
+   476→                        <TableHead className="text-start hidden lg:table-cell">{t.phone}</TableHead>
+   477→                        <TableHead className="text-start hidden xl:table-cell">{t.taxNumber}</TableHead>
+   478→                        <TableHead className="text-start">{t.status}</TableHead>
+   479→                        <TableHead className="text-start">{t.actions}</TableHead>
+   480→                      </TableRow>
+   481→                    </TableHeader>
+   482→                    <TableBody>
+   483→                      {paginatedCustomers.map((customer) => (
+   484→                        <TableRow key={customer.id} className="group">
+   485→                          <TableCell>
+   486→                            <span className="font-medium text-foreground">
+   487→                              {customer.name}
+   488→                            </span>
+   489→                          </TableCell>
+   490→                          <TableCell>
+   491→                            <span className="text-foreground">
+   492→                              {customer.nameAr}
+   493→                            </span>
+   494→                          </TableCell>
+   495→                          <TableCell className="hidden md:table-cell">
+   496→                            <span className="text-muted-foreground">
+   497→                              {customer.email}
+   498→                            </span>
+   499→                          </TableCell>
+   500→                          <TableCell className="hidden lg:table-cell">
+   501→                            <span dir="ltr" className="text-muted-foreground">
+   502→                              {customer.phone}
+   503→                            </span>
+   504→                          </TableCell>
+   505→                          <TableCell className="hidden xl:table-cell">
+   506→                            <span dir="ltr" className="text-muted-foreground font-mono text-xs">
+   507→                              {customer.taxNumber}
+   508→                            </span>
+   509→                          </TableCell>
+   510→                          <TableCell>
+   511→                            <Badge
+   512→                              variant={customer.isActive ? 'default' : 'secondary'}
+   513→                              className={
+   514→                                customer.isActive
+   515→                                  ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800'
+   516→                                  : 'bg-gray-100 text-gray-600 hover:bg-gray-100 border-gray-200 dark:bg-gray-800/30 dark:text-gray-400 dark:border-gray-700'
+   517→                              }
+   518→                            >
+   519→                              {customer.isActive
+   520→                                ? isRtl
+   521→                                  ? 'نشط'
+   522→                                  : 'Active'
+   523→                                : isRtl
+   524→                                  ? 'غير نشط'
+   525→                                  : 'Inactive'}
+   526→                            </Badge>
+   527→                          </TableCell>
+   528→                          <TableCell>
+   529→                            <div className="flex items-center gap-1">
+   530→                              <Button
+   531→                                variant="ghost"
+   532→                                size="icon"
+   533→                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+   534→                                onClick={() => handleEdit(customer)}
+   535→                                title={t.edit}
+   536→                              >
+   537→                                <Edit className="h-4 w-4" />
+   538→                              </Button>
+   539→                              <Button
+   540→                                variant="ghost"
+   541→                                size="icon"
+   542→                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+   543→                                onClick={() => handleDeleteClick(customer)}
+   544→                                title={t.delete}
+   545→                              >
+   546→                                <Trash2 className="h-4 w-4" />
+   547→                              </Button>
+   548→                            </div>
+   549→                          </TableCell>
+   550→                        </TableRow>
+   551→                      ))}
+   552→                    </TableBody>
+   553→                  </Table>
+   554→                </div>
+   555→
+   556→                {/* Pagination */}
+   557→                {totalPages > 1 && (
+   558→                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-4 border-t">
+   559→                    <p className="text-sm text-muted-foreground">
+   560→                      {t.showing}{' '}
+   561→                      <span className="font-medium text-foreground">
+   562→                        {(currentPage - 1) * ITEMS_PER_PAGE + 1}
+   563→                      </span>{' '}
+   564→                      -{' '}
+   565→                      <span className="font-medium text-foreground">
+   566→                        {Math.min(
+   567→                          currentPage * ITEMS_PER_PAGE,
+   568→                          filteredCustomers.length
+   569→                        )}
+   570→                      </span>{' '}
+   571→                      {t.of}{' '}
+   572→                      <span className="font-medium text-foreground">
+   573→                        {filteredCustomers.length}
+   574→                      </span>{' '}
+   575→                      {t.results}
+   576→                    </p>
+   577→                    <Pagination>
+   578→                      <PaginationContent>
+   579→                        <PaginationItem>
+   580→                          <PaginationPrevious
+   581→                            onClick={() =>
+   582→                              setCurrentPage((p) => Math.max(1, p - 1))
+   583→                            }
+   584→                            className={
+   585→                              currentPage === 1
+   586→                                ? 'pointer-events-none opacity-50'
+   587→                                : 'cursor-pointer'
+   588→                            }
+   589→                          />
+   590→                        </PaginationItem>
+   591→                        {getPageNumbers().map((page) => (
+   592→                          <PaginationItem key={page}>
+   593→                            <PaginationLink
+   594→                              isActive={currentPage === page}
+   595→                              onClick={() => setCurrentPage(page)}
+   596→                              className="cursor-pointer"
+   597→                            >
+   598→                              {page}
+   599→                            </PaginationLink>
+   600→                          </PaginationItem>
+   601→                        ))}
+   602→                        <PaginationItem>
+   603→                          <PaginationNext
+   604→                            onClick={() =>
+   605→                              setCurrentPage((p) => Math.min(totalPages, p + 1))
+   606→                            }
+   607→                            className={
+   608→                              currentPage === totalPages
+   609→                                ? 'pointer-events-none opacity-50'
+   610→                                : 'cursor-pointer'
+   611→                            }
+   612→                          />
+   613→                        </PaginationItem>
+   614→                      </PaginationContent>
+   615→                    </Pagination>
+   616→                  </div>
+   617→                )}
+   618→              </>
+   619→            )}
+   620→          </CardContent>
+   621→        </Card>
+   622→
+   623→        {/* Create / Edit Dialog */}
+   624→        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+   625→          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+   626→            <DialogHeader>
+   627→              <DialogTitle>
+   628→                {editingCustomer ? t.editCustomer : t.newCustomer}
+   629→              </DialogTitle>
+   630→            </DialogHeader>
+   631→            <div className="grid gap-4 py-2">
+   632→              {/* Customer Name (English) */}
+   633→              <div className="grid gap-2">
+   634→                <Label htmlFor="name">
+   635→                  {t.customerName}{' '}
+   636→                  <span className="text-destructive">*</span>
+   637→                </Label>
+   638→                <Input
+   639→                  id="name"
+   640→                  placeholder={
+   641→                    isRtl
+   642→                      ? 'أدخل اسم العميل بالإنجليزية'
+   643→                      : 'Enter customer name in English'
+   644→                  }
+   645→                  value={formData.name}
+   646→                  onChange={(e) => updateField('name', e.target.value)}
+   647→                  dir="ltr"
+   648→                />
+   649→              </div>
+   650→
+   651→              {/* Customer Name (Arabic) */}
+   652→              <div className="grid gap-2">
+   653→                <Label htmlFor="nameAr">{t.customerNameAr}</Label>
+   654→                <Input
+   655→                  id="nameAr"
+   656→                  placeholder={
+   657→                    isRtl
+   658→                      ? 'أدخل اسم العميل بالعربية'
+   659→                      : 'Enter customer name in Arabic'
+   660→                  }
+   661→                  value={formData.nameAr}
+   662→                  onChange={(e) => updateField('nameAr', e.target.value)}
+   663→                  dir="rtl"
+   664→                />
+   665→              </div>
+   666→
+   667→              {/* Email */}
+   668→              <div className="grid gap-2">
+   669→                <Label htmlFor="email">{t.email}</Label>
+   670→                <Input
+   671→                  id="email"
+   672→                  type="email"
+   673→                  placeholder={
+   674→                    isRtl
+   675→                      ? 'أدخل البريد الإلكتروني'
+   676→                      : 'Enter email address'
+   677→                  }
+   678→                  value={formData.email}
+   679→                  onChange={(e) => updateField('email', e.target.value)}
+   680→                  dir="ltr"
+   681→                />
+   682→              </div>
+   683→
+   684→              {/* Phone */}
+   685→              <div className="grid gap-2">
+   686→                <Label htmlFor="phone">{t.phone}</Label>
+   687→                <Input
+   688→                  id="phone"
+   689→                  type="tel"
+   690→                  placeholder={
+   691→                    isRtl ? 'أدخل رقم الهاتف' : 'Enter phone number'
+   692→                  }
+   693→                  value={formData.phone}
+   694→                  onChange={(e) => updateField('phone', e.target.value)}
+   695→                  dir="ltr"
+   696→                />
+   697→              </div>
+   698→
+   699→              {/* Address */}
+   700→              <div className="grid gap-2">
+   701→                <Label htmlFor="address">{t.address}</Label>
+   702→                <Textarea
+   703→                  id="address"
+   704→                  placeholder={
+   705→                    isRtl ? 'أدخل العنوان' : 'Enter address'
+   706→                  }
+   707→                  value={formData.address}
+   708→                  onChange={(e) => updateField('address', e.target.value)}
+   709→                  dir="rtl"
+   710→                  rows={3}
+   711→                />
+   712→              </div>
+   713→
+   714→              {/* Tax Number */}
+   715→              <div className="grid gap-2">
+   716→                <Label htmlFor="taxNumber">{t.taxNumber}</Label>
+   717→                <Input
+   718→                  id="taxNumber"
+   719→                  placeholder={
+   720→                    isRtl
+   721→                      ? 'أدخل الرقم الضريبي'
+   722→                      : 'Enter tax number'
+   723→                  }
+   724→                  value={formData.taxNumber}
+   725→                  onChange={(e) => updateField('taxNumber', e.target.value)}
+   726→                  dir="ltr"
+   727→                />
+   728→              </div>
+   729→            </div>
+   730→            <DialogFooter className="gap-2 sm:gap-0">
+   731→              <Button
+   732→                variant="outline"
+   733→                onClick={() => setIsDialogOpen(false)}
+   734→                disabled={isSubmitting}
+   735→              >
+   736→                {t.cancel}
+   737→              </Button>
+   738→              <Button onClick={handleSubmit} disabled={isSubmitting}>
+   739→                {isSubmitting && (
+   740→                  <Loader2 className="h-4 w-4 animate-spin" />
+   741→                )}
+   742→                {isSubmitting
+   743→                  ? t.loading
+   744→                  : editingCustomer
+   745→                    ? t.save
+   746→                    : t.create}
+   747→              </Button>
+   748→            </DialogFooter>
+   749→          </DialogContent>
+   750→        </Dialog>
+   751→
+   752→        {/* Delete Confirmation AlertDialog */}
+   753→        <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+   754→          <AlertDialogContent>
+   755→            <AlertDialogHeader>
+   756→              <AlertDialogTitle>{t.areYouSure}</AlertDialogTitle>
+   757→              <AlertDialogDescription>
+   758→                {isRtl
+   759→                  ? `هل أنت متأكد من حذف العميل "${deletingCustomer?.nameAr}"؟ لا يمكن التراجع عن هذا الإجراء.`
+   760→                  : `Are you sure you want to delete customer "${deletingCustomer?.name}"? This action cannot be undone.`}
+   761→              </AlertDialogDescription>
+   762→            </AlertDialogHeader>
+   763→            <AlertDialogFooter>
+   764→              <AlertDialogCancel disabled={isDeleting}>
+   765→                {t.cancel}
+   766→              </AlertDialogCancel>
+   767→              <AlertDialogAction
+   768→                onClick={handleConfirmDelete}
+   769→                disabled={isDeleting}
+   770→                className="bg-destructive text-white hover:bg-destructive/90"
+   771→              >
+   772→                {isDeleting && (
+   773→                  <Loader2 className="h-4 w-4 animate-spin" />
+   774→                )}
+   775→                {isDeleting ? t.loading : t.delete}
+   776→              </AlertDialogAction>
+   777→            </AlertDialogFooter>
+   778→          </AlertDialogContent>
+   779→        </AlertDialog>
+   780→      </div>
+   781→    </AppShell>
+   782→  );
+   783→}
+   784→

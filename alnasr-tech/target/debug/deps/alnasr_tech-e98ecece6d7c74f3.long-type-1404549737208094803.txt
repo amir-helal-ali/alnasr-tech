@@ -1,3 +1,0 @@
-tower_http::limit::ResponseBody<tower_http::trace::ResponseBody<CompressionBody<axum::body::Body>, NeverClassifyEos<ServerErrorsFailureClass>>>
-tower_http::limit::ResponseBody<tower_http::trace::ResponseBody<CompressionBody<axum::body::Body>, NeverClassifyEos<ServerErrorsFailureClass>>>: std::default::Default
-tower_http::timeout::Timeout<RequestBodyLimit<Trace<Cors<Compression<Route>>, SharedClassifier<ServerErrorsAsFailures>>>>

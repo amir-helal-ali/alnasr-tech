@@ -1,12 +1,5 @@
 // Al-Nasr Tech ERP API Client
-// Connects to the Rust Axum backend
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
-
-interface ApiError {
-  message: string;
-  code?: string;
-}
+// Uses Next.js API routes (which proxy to Rust backend when available)
 
 class ApiClient {
   private token: string | null = null;
@@ -37,23 +30,6 @@ class ApiClient {
     }
   }
 
-  private async refreshAccessToken(): Promise<boolean> {
-    if (!this.refreshToken) return false;
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: this.refreshToken }),
-      });
-      if (!res.ok) return false;
-      const data = await res.json();
-      this.setTokens(data.access_token, data.refresh_token);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -64,27 +40,23 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    let res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
-
-    if (res.status === 401 && this.refreshToken) {
-      const refreshed = await this.refreshAccessToken();
-      if (refreshed) {
-        headers['Authorization'] = `Bearer ${this.token}`;
-        res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
-      } else {
-        this.clearTokens();
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('auth:logout'));
-        }
-        throw new Error('Session expired');
-      }
-    }
+    let res = await fetch(endpoint, { ...options, headers });
 
     if (!res.ok) {
-      const err: ApiError = await res.json().catch(() => ({ message: 'Request failed' }));
+      const err = await res.json().catch(() => ({ message: 'Request failed' }));
+      if (res.status === 401) {
+        this.clearTokens();
+        if (typeof window !== 'undefined') {
+          document.cookie = 'auth_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+          window.dispatchEvent(new Event('auth:logout'));
+        }
+      }
       throw new Error(err.message || `HTTP ${res.status}`);
     }
 
+    // Handle 204 No Content
+    if (res.status === 204) return undefined as T;
+    
     return res.json();
   }
 
@@ -120,6 +92,9 @@ class ApiClient {
 
   async logout() {
     this.clearTokens();
+    if (typeof document !== 'undefined') {
+      document.cookie = 'auth_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    }
   }
 
   // Customers
@@ -308,11 +283,11 @@ export interface User {
 export interface Customer {
   id: string;
   name: string;
-  name_ar?: string;
+  nameAr?: string;
   email?: string;
   phone?: string;
   address?: string;
-  tax_number?: string;
+  taxNumber?: string;
   tenant_id: string;
   is_active: boolean;
   created_at: string;

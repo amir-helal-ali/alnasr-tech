@@ -1,0 +1,15 @@
+/home/z/my-project/alnasr-tech/target/debug/deps/csv-9f47921cdacfc58f.d: /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/lib.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/byte_record.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/cookbook.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/debug.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/deserializer.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/error.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/reader.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/serializer.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/string_record.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/tutorial.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/writer.rs
+
+/home/z/my-project/alnasr-tech/target/debug/deps/libcsv-9f47921cdacfc58f.rmeta: /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/lib.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/byte_record.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/cookbook.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/debug.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/deserializer.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/error.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/reader.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/serializer.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/string_record.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/tutorial.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/writer.rs
+
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/lib.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/byte_record.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/cookbook.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/debug.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/deserializer.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/error.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/reader.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/serializer.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/string_record.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/tutorial.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/src/writer.rs:

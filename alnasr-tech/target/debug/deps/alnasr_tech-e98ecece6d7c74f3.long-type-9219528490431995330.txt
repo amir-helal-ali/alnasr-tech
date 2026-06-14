@@ -1,0 +1,2 @@
+fn(State<Pool<Postgres>>, Claims, axum::extract::Query<ListUsersQuery>) -> impl std::future::Future<Output = Result<axum::Json<UserListResponse>, AppError>> {list_users}
+Handler<(axum_core::extract::private::ViaParts, State<Pool<Postgres>>, Claims, axum::extract::Query<ListUsersQuery>), ()>

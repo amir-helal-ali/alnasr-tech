@@ -1,0 +1,15 @@
+target/
+debug/
+*.pdb
+.git/
+.github/
+.env
+.env.*
+!.env.example
+docs/
+scripts/
+rbf/
+*.md
+docker-compose.yml
+.dockerignore
+migrations/

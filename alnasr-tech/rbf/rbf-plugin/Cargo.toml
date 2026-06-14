@@ -1,0 +1,10 @@
+[package]
+name = "rbf-plugin"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+rbf-core = { path = "../rbf-core" }
+tracing = "0.1"

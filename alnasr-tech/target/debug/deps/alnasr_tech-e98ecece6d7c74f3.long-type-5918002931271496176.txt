@@ -1,0 +1,2 @@
+fn(State<Pool<Postgres>>, Claims, axum::Json<ChangePasswordRequest>) -> impl std::future::Future<Output = Result<axum::Json<JsonValue>, AppError>> {change_password_handler}
+Handler<(axum_core::extract::private::ViaRequest, State<Pool<Postgres>>, Claims, axum::Json<ChangePasswordRequest>), ()>

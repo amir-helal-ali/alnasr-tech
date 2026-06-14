@@ -1,0 +1,99 @@
+[workspace]
+resolver = "2"
+members = [
+    ".",
+    "rbf/rbf-core",
+    "rbf/rbf-parser",
+    "rbf/rbf-codegen",
+    "rbf/rbf-runtime",
+    "rbf/rbf-plugin",
+    "rbf/rbf-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "1"
+anyhow = "1"
+
+[package]
+name = "alnasr-tech"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Al-Nasr Tech ERP + E-Invoicing System"
+
+[features]
+default = []
+rbf = ["dep:wasmtime", "dep:wasmtime-wasi"]
+
+[dependencies]
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Web framework
+axum = { version = "0.7", features = ["macros", "multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace", "timeout", "limit", "compression-gzip", "request-id", "propagate-header", "sensitive-headers"] }
+http = "1"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "migrate", "json", "rust_decimal"] }
+
+# Auth & Crypto
+argon2 = "0.5"
+jsonwebtoken = "9"
+rsa = { version = "0.9", features = ["pem"] }
+sha2 = "0.10"
+rand = "0.8"
+secrecy = { version = "0.10", features = ["serde"] }
+
+# Time & IDs
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+prometheus = "0.13"
+
+# Email
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "hostname"] }
+
+# PDF
+printpdf = "0.7"
+
+# Config
+dotenvy = "0.15"
+
+# CSV
+csv = "1"
+
+# Decimal
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+
+# Validation
+validator = { version = "0.16", features = ["derive"] }
+
+# Errors
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# HTTP client (for ETA API)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Base64
+base64 = "0.22"
+
+# RBF (optional – not compiled by default)
+wasmtime = { version = "17", optional = true }
+wasmtime-wasi = { version = "17", optional = true }

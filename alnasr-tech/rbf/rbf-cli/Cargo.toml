@@ -1,0 +1,12 @@
+[package]
+name = "rbf-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+rbf-core = { path = "../rbf-core" }
+rbf-parser = { path = "../rbf-parser" }
+rbf-codegen = { path = "../rbf-codegen" }

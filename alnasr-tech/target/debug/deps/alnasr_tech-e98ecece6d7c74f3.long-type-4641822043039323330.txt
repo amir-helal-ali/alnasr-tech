@@ -1,0 +1,6 @@
+axum::middleware::FromFn<fn(http::Request<axum::body::Body>, Next) -> impl std::future::Future<Output = http::Response<axum::body::Body>> {hsts_middleware}, (), Cors<tower_http::timeout::Timeout<RequestBodyLimit<Compression<Route>>>>, _>
+axum::middleware::FromFn<fn(http::Request<axum::body::Body>, Next) -> impl std::future::Future<Output = http::Response<axum::body::Body>> {hsts_middleware}, (), Cors<tower_http::timeout::Timeout<RequestBodyLimit<Compression<Route>>>>, _>: Service<http::Request<axum::body::Body>>
+axum::middleware::FromFn<F, S, I, (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14)>
+axum::middleware::FromFn<F, S, I, (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15)>
+axum::middleware::FromFn<F, S, I, (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16)>
+Trace<axum::middleware::FromFn<fn(http::Request<axum::body::Body>, Next) -> impl std::future::Future<Output = http::Response<axum::body::Body>> {hsts_middleware}, (), Cors<tower_http::timeout::Timeout<RequestBodyLimit<Compression<Route>>>>, _>, SharedClassifier<ServerErrorsAsFailures>>

@@ -1,0 +1,10 @@
+[package]
+name = "rbf-runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+rbf-core = { path = "../rbf-core" }
+tokio = { version = "1", features = ["sync"] }

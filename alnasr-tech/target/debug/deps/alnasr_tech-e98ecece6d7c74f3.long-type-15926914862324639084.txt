@@ -1,0 +1,2 @@
+fn(State<Pool<Postgres>>, Claims, axum::extract::Query<DateRangeQuery>) -> impl std::future::Future<Output = Result<axum::Json<Vec<RevenueByMonth>>, AppError>> {revenue_handler}
+Handler<(axum_core::extract::private::ViaParts, State<Pool<Postgres>>, Claims, axum::extract::Query<DateRangeQuery>), ()>

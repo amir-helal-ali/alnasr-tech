@@ -70,10 +70,17 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_API_URL is embedded at build time and used by the browser.
+        # Must be a URL the browser can reach — NOT a Docker-internal hostname.
+        # When running via docker compose on the same host, the browser accesses
+        # the backend through the published port on localhost.
+        NEXT_PUBLIC_API_URL: "http://localhost:${BACKEND_PORT:-3001}"
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://backend:3000
+      # Runtime env for the Node server (not embedded in client bundle)
+      NEXT_PUBLIC_API_URL: "http://localhost:${BACKEND_PORT:-3001}"
     depends_on:
       backend:
         condition: service_healthy

@@ -26,6 +26,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
 # Build argument for the API URL - can be overridden at build time
+# This is embedded in the client bundle at build time (NEXT_PUBLIC_*)
 ARG NEXT_PUBLIC_API_URL=http://localhost:3001
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
@@ -47,9 +48,6 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-
-# Copy the env file for runtime
-COPY --from=builder /app/.env ./
 
 USER nextjs
 

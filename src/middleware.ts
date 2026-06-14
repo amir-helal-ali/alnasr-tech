@@ -10,6 +10,7 @@ const protectedPaths = [
   '/einvoicing',
   '/audit',
   '/analytics',
+  '/reports',
   '/settings',
   '/profile',
 ];

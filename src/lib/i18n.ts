@@ -75,6 +75,7 @@ export const translations = {
     einvoicing: 'الفوترة الإلكترونية',
     audit: 'سجل المراجعة',
     analytics: 'التحليلات',
+    reports: 'التقارير',
     settings: 'الإعدادات',
     
     // Dashboard
@@ -243,6 +244,7 @@ export const translations = {
     einvoicing: 'E-Invoicing',
     audit: 'Audit Log',
     analytics: 'Analytics',
+    reports: 'Reports',
     settings: 'Settings',
     
     totalRevenue: 'Total Revenue',

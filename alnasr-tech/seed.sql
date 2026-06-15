@@ -35,7 +35,7 @@ INSERT INTO users (id, email, password_hash, name, tenant_id, role, is_active, c
 VALUES (
     'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
     'admin@alnasr.tech',
-    '$argon2id$v=19$m=19456,t=2,p=1$YWKwPVi5VbN3r8v0FxJfPQ$KqzFZwV+0gE31vZMkDxvXUOR1wRZGCqF5Fhvp+PYVHU',
+    '$argon2id$v=19$m=19456,t=2,p=1$57ijwATqEkb+zWdSHwwVeA$eLg4QHPL8Vsnn/NHm5bc3EUo6KoGE76RVF9WOwGLsJg',
     'أمير هلال',
     'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
     'admin',
@@ -49,7 +49,7 @@ INSERT INTO users (id, email, password_hash, name, tenant_id, role, is_active, c
 VALUES (
     'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a23',
     'accountant@alnasr.tech',
-    '$argon2id$v=19$m=19456,t=2,p=1$YWKwPVi5VbN3r8v0FxJfPQ$KqzFZwV+0gE31vZMkDxvXUOR1wRZGCqF5Fhvp+PYVHU',
+    '$argon2id$v=19$m=19456,t=2,p=1$eVueTZm8+YXrdX7yx3Mbjw$XFxhggxD03aNFFzRjgaGDxktuNu2mHe1cUSRJMw5S28',
     'أحمد محمد',
     'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
     'accountant',

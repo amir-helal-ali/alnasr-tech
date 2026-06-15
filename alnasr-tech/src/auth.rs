@@ -245,11 +245,16 @@ async fn register_handler(
     let tenant_id = req.tenant_id.unwrap_or_else(Uuid::new_v4);
     let now = Utc::now();
 
+    // First user creating a new organization becomes admin;
+    // users joining an existing organization get "user" role.
+    let is_new_org = req.tenant_id.is_none();
+    let role = if is_new_org { "admin" } else { "user" };
+
     // Use transaction for atomic tenant + user creation
     let mut tx = pool.begin().await?;
 
     // Create tenant if not provided
-    if req.tenant_id.is_none() {
+    if is_new_org {
         sqlx::query(
             "INSERT INTO tenants (id, name, plan, is_active, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)"
         )
@@ -272,7 +277,7 @@ async fn register_handler(
     .bind(&password_hash)
     .bind(&req.name)
     .bind(tenant_id)
-    .bind("admin")
+    .bind(role)
     .bind(true)
     .bind(now)
     .bind(now)
@@ -287,7 +292,7 @@ async fn register_handler(
         password_hash,
         name: req.name,
         tenant_id: Some(tenant_id),
-        role: "admin".to_string(),
+        role: role.to_string(),
         is_active: true,
         created_at: now,
         updated_at: now,
